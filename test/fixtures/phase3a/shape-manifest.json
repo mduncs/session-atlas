@@ -1,0 +1,522 @@
+{
+  "version": "phase3a-synthetic-v1",
+  "fixtures": [
+    {
+      "fixture_id": "F01",
+      "opaque_provenance_token": "P-F01",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          4,
+          4,
+          2,
+          2,
+          3,
+          3,
+          3,
+          1,
+          2,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F02",
+      "opaque_provenance_token": "P-F02",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          4,
+          4,
+          0,
+          0,
+          4,
+          4,
+          2,
+          1,
+          1,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F03",
+      "opaque_provenance_token": "P-F03",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F04",
+      "opaque_provenance_token": "P-F04",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          2,
+          2,
+          0,
+          0,
+          2,
+          2,
+          2,
+          1,
+          1,
+          0,
+          0
+        ],
+        [
+          10,
+          10,
+          0,
+          0,
+          10,
+          10,
+          10,
+          5,
+          5,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F05",
+      "opaque_provenance_token": "P-F05",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          4,
+          4,
+          3,
+          3,
+          2,
+          2,
+          2,
+          1,
+          1,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F06",
+      "opaque_provenance_token": "P-F06",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F07",
+      "opaque_provenance_token": "P-F07",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F08",
+      "opaque_provenance_token": "P-F08",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F09",
+      "opaque_provenance_token": "P-F09",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          2,
+          2,
+          0,
+          0,
+          2,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F10",
+      "opaque_provenance_token": "P-F10",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          2,
+          2,
+          0,
+          0,
+          2,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          3,
+          3,
+          0,
+          0,
+          3,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F11",
+      "opaque_provenance_token": "P-F11",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          2,
+          2,
+          0,
+          0,
+          2,
+          2,
+          2,
+          1,
+          1,
+          0,
+          0
+        ],
+        [
+          3,
+          3,
+          1,
+          1,
+          2,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          6,
+          6,
+          1,
+          1,
+          5,
+          5,
+          2,
+          1,
+          1,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F12",
+      "opaque_provenance_token": "P-F12",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          3,
+          3,
+          1,
+          1,
+          2,
+          2,
+          2,
+          1,
+          1,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F13",
+      "opaque_provenance_token": "P-F13",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          4,
+          4,
+          2,
+          2,
+          2,
+          2,
+          2,
+          1,
+          1,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F14",
+      "opaque_provenance_token": "P-F14",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          2,
+          2,
+          0,
+          0,
+          2,
+          2,
+          2,
+          1,
+          1,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F15",
+      "opaque_provenance_token": "P-F15",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          7,
+          7,
+          0,
+          0,
+          5,
+          5,
+          1,
+          1,
+          0,
+          0,
+          2
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F16",
+      "opaque_provenance_token": "P-F16",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          26,
+          26,
+          10,
+          10,
+          8,
+          8,
+          3,
+          1,
+          2,
+          0,
+          2
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F17",
+      "opaque_provenance_token": "P-F17",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F18",
+      "opaque_provenance_token": "P-F18",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F19",
+      "opaque_provenance_token": "P-F19",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          3,
+          3,
+          0,
+          0,
+          3,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "fixture_id": "F20",
+      "opaque_provenance_token": "P-F20",
+      "generated_shape": "reserved-structural-envelope",
+      "expected_gx": [
+        [
+          10,
+          10,
+          9,
+          9,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0
+        ]
+      ]
+    }
+  ]
+}

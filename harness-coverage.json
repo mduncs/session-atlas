@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "manifestVersion": 1,
+  "generatedAt": "2026-08-08T07:00:00Z",
+  "scope": "local durable AI coding/session harness history",
+  "privacy": "metadata and parser capability only; no transcript text or credentials",
+  "statusVocabulary": {
+    "supported_recording": "adapter and durable source exist; incremental/manual/rebuild paths supported",
+    "historical_read_only": "adapter supports retained retiring source; no live writes or source deletion",
+    "unsupported_no_source": "no installed/current durable session source was found",
+    "intentionally_excluded": "evidence is not an independent session source or is not yet present"
+  },
+  "capturePolicy": {
+    "sourceMutation": false,
+    "providerCalls": false,
+    "manual": "atlas index [--full]",
+    "targetedHook": "atlas note <native-id> --harness claude|codex --ingest-only",
+    "reconciliation": "provider-free periodic `atlas index --scheduled`; required correctness path for Prime and other durable daemons; macOS installation uses scripts/ensure-launchd.sh with an index agent and self-healing watchdog",
+    "rebuild": "shadow DB, stable-data snapshot, validation, atomic swap, rollback backup",
+    "helpAndReadOnly": "verb-local --help exits before config/DB dispatch; status/read commands never auto-index"
+  },
+  "harnesses": [
+    {
+      "id": "claude",
+      "displayName": "Claude Code",
+      "status": "supported_recording",
+      "installedVersion": "2.1.226",
+      "adapter": "src/adapters/claude.ts",
+      "sources": [
+        {
+          "path": "~/.claude/projects",
+          "role": "live",
+          "discoveredUnits": 790,
+          "bytes": 638044633
+        },
+        {
+          "path": "<private archive>/claude-sessions/projects",
+          "role": "private archive",
+          "discoveredUnits": 4998,
+          "bytes": 6188159557
+        }
+      ],
+      "capture": [
+        "manual",
+        "SessionEnd targeted hook",
+        "periodic reconciliation",
+        "full rebuild"
+      ],
+      "continuity": "supported: system/compact_boundary",
+      "relationship": "agentId/isSidechain/subagents path; no Prime/RLM parent metadata"
+    },
+    {
+      "id": "codex",
+      "displayName": "Codex CLI",
+      "status": "supported_recording",
+      "installedVersion": "0.146.0",
+      "adapter": "src/adapters/codex.ts",
+      "sources": [
+        {
+          "path": "~/.codex",
+          "role": "live",
+          "discoveredUnits": 1250,
+          "bytes": 2334325179
+        },
+        {
+          "path": "<private archive>/codex-sessions",
+          "role": "private archive",
+          "discoveredUnits": 1257,
+          "bytes": 2340505421
+        }
+      ],
+      "capture": [
+        "manual",
+        "SessionEnd targeted hook",
+        "periodic reconciliation",
+        "full rebuild"
+      ],
+      "continuity": "unknown: no proved durable seam",
+      "relationship": "session_meta parent_thread_id/subagent.thread_spawn only"
+    },
+    {
+      "id": "prime",
+      "displayName": "Prime Agent",
+      "status": "supported_recording",
+      "installedVersion": "0.7.1",
+      "adapter": "src/adapters/prime.ts",
+      "sources": [
+        {
+          "path": "~/.prime/agent/sessions/*.jsonl",
+          "role": "root sessions",
+          "discoveredUnits": 15,
+          "bytesApprox": 31785482
+        },
+        {
+          "path": "~/.prime/agent/session-artifacts/*/sub-*/*.jsonl",
+          "role": "RLM child sessions",
+          "discoveredUnits": 116,
+          "bytesApprox": 79165747
+        },
+        {
+          "path": "~/.prime/agent/tmux-panes/*/sessions/*.jsonl",
+          "role": "tmux root sessions",
+          "discoveredUnits": 3,
+          "bytesApprox": 2073
+        }
+      ],
+      "validatedProjection": {
+        "discoveredUnits": 134,
+        "parsedUnits": 134,
+        "messages": 30884,
+        "transcriptBytes": 110953302,
+        "rlmChildren": 116,
+        "continuityEvents": 18
+      },
+      "capture": [
+        "manual",
+        "periodic reconciliation",
+        "full rebuild"
+      ],
+      "continuity": "supported: compaction records",
+      "relationship": "embedded session.id owns identity; child session.parentSession resolves to parent embedded id; rlm-subagents.jsonl inventoried as an official cross-check, never filename-inferred",
+      "notes": [
+        "Prime has no SessionEnd dependency; periodic reconciliation is the correctness path",
+        "external Claude supervisors are not Prime/RLM children and must use separate manager/provenance metadata"
+      ]
+    },
+    {
+      "id": "hermes",
+      "displayName": "Hermes CLI",
+      "status": "supported_recording",
+      "installedVersion": "0.19.0",
+      "adapter": "src/adapters/hermes.ts",
+      "sources": [
+        {
+          "path": "~/.hermes/state.db",
+          "role": "live SQLite",
+          "discoveredUnits": 13,
+          "bytes": 757760,
+          "messages": 84
+        }
+      ],
+      "capture": [
+        "manual",
+        "periodic reconciliation",
+        "full rebuild"
+      ],
+      "continuity": "unsupported in sampled schema",
+      "relationship": "sessions.parent_session_id only"
+    },
+    {
+      "id": "kimi",
+      "displayName": "Kimi Code",
+      "status": "supported_recording",
+      "installedVersion": "1.49.0",
+      "adapter": "src/adapters/kimi.ts",
+      "sources": [
+        {
+          "path": "~/.kimi/sessions/**/context.jsonl",
+          "role": "durable current contexts",
+          "discoveredUnits": 129,
+          "bytes": 5733548
+        },
+        {
+          "path": "~/.kimi/sessions/**/wire.jsonl",
+          "role": "redundant current event stream",
+          "discoveredUnits": 6,
+          "classification": "not a separate session; context is canonical transcript input"
+        },
+        {
+          "path": "~/.kimi/user_history/*.jsonl",
+          "role": "workspace input history",
+          "classification": "not an independent session source"
+        }
+      ],
+      "validatedProjection": {
+        "parsedUnits": 129,
+        "messages": 194,
+        "subagents": 1,
+        "continuityEvents": 43
+      },
+      "capture": [
+        "manual",
+        "periodic reconciliation",
+        "full rebuild"
+      ],
+      "continuity": "supported: _checkpoint records",
+      "relationship": "subagents path within the same session directory; no invented parent for roots"
+    },
+    {
+      "id": "zcode",
+      "displayName": "ZCode",
+      "status": "historical_read_only",
+      "installedVersion": "0.15.0",
+      "adapter": "src/adapters/zcode.ts",
+      "sources": [
+        {
+          "path": "~/.zcode/cli/db/db.sqlite",
+          "role": "retiring SQLite",
+          "discoveredUnits": 85,
+          "bytes": 16572416
+        },
+        {
+          "path": "~/.zcode/cli/agents/**/transcript.jsonl",
+          "role": "retiring external-agent transcripts",
+          "discoveredUnits": 16
+        }
+      ],
+      "validatedProjection": {
+        "copies": 101,
+        "uniqueSessions": 95,
+        "messagesAcrossCopies": 689,
+        "ingestedUniqueMessages": 593,
+        "semanticTranscriptBytesAcrossCopies": 48971091,
+        "agentCopies": 22,
+        "uniqueAgentSessions": 16,
+        "parseErrors": 0
+      },
+      "capture": [
+        "manual",
+        "periodic reconciliation while retirement source exists",
+        "full rebuild"
+      ],
+      "continuity": "unsupported in sampled formats",
+      "relationship": "SQLite parent_id/task_type or external-agent parent directory; never Prime/RLM"
+    },
+    {
+      "id": "kilo",
+      "displayName": "Kilo/Kilocode",
+      "status": "historical_read_only",
+      "installedVersion": "retiring",
+      "adapter": "src/adapters/kilo.ts",
+      "sources": [
+        {
+          "path": "<retirement copy>/kilo/share/kilo.db",
+          "role": "owner-private retirement copy",
+          "discoveredUnits": 234,
+          "bytes": 63201280
+        }
+      ],
+      "validatedProjection": {
+        "parsedUnits": 234,
+        "messages": 2907,
+        "transcriptBytes": 48978239,
+        "childSessions": 15
+      },
+      "capture": [
+        "manual",
+        "periodic reconciliation while retained",
+        "full rebuild"
+      ],
+      "continuity": "unsupported in sampled schema",
+      "relationship": "session.parent_id only"
+    },
+    {
+      "id": "prime-external-claude",
+      "displayName": "Prime-supervised external Claude worker",
+      "status": "intentionally_excluded",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "future route, no durable session source currently present",
+      "requiredProvenance": {
+        "manager": "prime",
+        "runtime": "external/claude",
+        "native_prime_child": false,
+        "rlmParentSession": null
+      }
+    },
+    {
+      "id": "opencode",
+      "displayName": "opencode",
+      "status": "unsupported_no_source",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "no installed/current durable local session source found during census"
+    },
+    {
+      "id": "aider",
+      "displayName": "aider",
+      "status": "unsupported_no_source",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "no installed/current durable local session source found during census"
+    },
+    {
+      "id": "gemini-cli",
+      "displayName": "gemini-cli",
+      "status": "unsupported_no_source",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "no installed/current durable local session source found during census"
+    },
+    {
+      "id": "goose",
+      "displayName": "goose",
+      "status": "unsupported_no_source",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "no installed/current durable local session source found during census"
+    },
+    {
+      "id": "amp",
+      "displayName": "amp",
+      "status": "unsupported_no_source",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "no installed/current durable local session source found during census"
+    },
+    {
+      "id": "cursor-cli",
+      "displayName": "cursor-cli",
+      "status": "unsupported_no_source",
+      "installedVersion": null,
+      "adapter": null,
+      "sources": [],
+      "reason": "no installed/current durable local session source found during census"
+    }
+  ],
+  "evidenceArtifacts": [
+    "test/wave6-harness-coverage.test.ts",
+    "~/.prime/agent/session-artifacts/<validation run>/adapter-validation.jsonl"
+  ],
+  "archiveSchema": {
+    "worktree": 10,
+    "liveReadOnlyObserved": 9,
+    "v10Purpose": "conditional repair for dirty pre-release logical_metrics plus persisted semantic transcript election bytes"
+  }
+}

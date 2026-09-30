@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.session-atlas.index</string>
+
+  <!-- Replace these absolute paths before loading. launchd does not read your interactive shell setup. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_ME_ABSOLUTE_INDEX_WRAPPER_PATH</string>
+    <string>run</string>
+    <string>REPLACE_ME_ABSOLUTE_REPO_PATH/src/cli.ts</string>
+    <string>index</string>
+    <string>--scheduled</string>
+    <string>--config</string>
+    <string>REPLACE_ME_ABSOLUTE_CONFIG_PATH</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_ME_ABSOLUTE_REPO_PATH</string>
+  <key>StartInterval</key>
+  <integer>1800</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>REPLACE_ME_ABSOLUTE_LOG_PATH/session-atlas-index.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPLACE_ME_ABSOLUTE_LOG_PATH/session-atlas-index.error.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NO_COLOR</key>
+    <string>1</string>
+  </dict>
+  <!-- launchd interprets this decimal value as mode mask 0077. -->
+  <key>Umask</key>
+  <integer>63</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+</dict>
+</plist>

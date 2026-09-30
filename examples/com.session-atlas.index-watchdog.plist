@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.session-atlas.index-watchdog</string>
+
+  <!-- The installer replaces these placeholders with absolute paths. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_ME_ABSOLUTE_WATCHDOG_WRAPPER_PATH</string>
+    <string>REPLACE_ME_ABSOLUTE_WATCHDOG_SCRIPT_PATH</string>
+    <string>--watchdog</string>
+    <string>--config</string>
+    <string>REPLACE_ME_ABSOLUTE_CONFIG_PATH</string>
+  </array>
+
+  <!-- Do not use the external repository volume as the watchdog cwd. -->
+  <key>WorkingDirectory</key>
+  <string>/</string>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>REPLACE_ME_ABSOLUTE_LOG_PATH/session-atlas-watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPLACE_ME_ABSOLUTE_LOG_PATH/session-atlas-watchdog.error.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NO_COLOR</key>
+    <string>1</string>
+  </dict>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+</dict>
+</plist>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.session-atlas.layers-runner</string>
+
+  <!-- Works queued model-layer jobs (atlas layers plan …). It pauses at 95% of
+       the Claude five-hour or seven-day window, sleeps until reset, and resumes
+       from its ledger; SIGTERM returns in-flight items to pending. It exits 0
+       when no job is active, and launchd restarts it only after a crash.
+       Queue more work, then: launchctl kickstart gui/$(id -u)/com.session-atlas.layers-runner -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_ME_ABSOLUTE_LAYERS_WRAPPER_PATH</string>
+    <string>run</string>
+    <string>REPLACE_ME_ABSOLUTE_REPO_PATH/src/cli.ts</string>
+    <string>layers</string>
+    <string>run</string>
+    <string>--threshold</string>
+    <string>0.95</string>
+    <string>--config</string>
+    <string>REPLACE_ME_ABSOLUTE_CONFIG_PATH</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_ME_ABSOLUTE_REPO_PATH</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>300</integer>
+
+  <key>StandardOutPath</key>
+  <string>REPLACE_ME_ABSOLUTE_LOG_PATH/session-atlas-layers.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPLACE_ME_ABSOLUTE_LOG_PATH/session-atlas-layers.error.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NO_COLOR</key>
+    <string>1</string>
+    <key>ATLAS_CLAUDE_BIN</key>
+    <string>REPLACE_ME_ABSOLUTE_CLAUDE_BIN</string>
+  </dict>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+</dict>
+</plist>

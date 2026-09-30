@@ -1,0 +1,65 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# atlas runtime data
+exports/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# local env / secrets
+.env
+.env.*
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# logs
+*.log
+
+# Agent briefs and harness config. Kept on disk, never published.
+CLAUDE.md
+AGENTS.md
+.claude/
+.codex/
+
+# Local planning, specification, and gate-evidence material. These predate the
+# public repo and are written for me, not for a reader: they carry statistics
+# derived from my real session archive, dated QA evidence, and internal review
+# transcripts. The README is the public document.
+PLANNING.md
+BUILD.md
+BUILD_PLAN.md
+SPEC.md
+HANDOFF.md
+VERDICT.md
+ISSUES.md
+PROJECT_STATE.md
+WALKTHROUGH.md
+/review/
+
+# Untracked working notes, briefs, and third-party comparison clones. On disk,
+# never published.
+NEXT-STEPS.md
+TODO.md
+WRITER-COORDINATOR-BRIEF.md
+docs/WORKTHROUGH-*.md
+docs/INK-REFINEMENT.md
+/research/
+
+# Owner-local rollout records (kept on disk, not published)
+CENSUS.md
+CONTRACT.md
+PHASE*.md
+REWORK*.md
+archive-consolidation.json
