@@ -419,7 +419,7 @@ test("Ink reader buttons use live favorites, conflict-safe undo, cached summarie
     expect(bridge.store!.favorites()).toHaveLength(0);
     clickLabel(" < back ", 0); await frameContains(app, "SESSIONS");
     expect(db.query("SELECT count(*) AS n FROM favorites").get()).toEqual({ n: 0 });
-    clickLabel("processing", footer() + 1); await frameContains(app, "SUMMARY PROCESSING");
+    clickLabel("status", footer() + 1); await frameContains(app, "SUMMARY PROCESSING");
     expect(app.view.lastFrame()).toContain("unconfigured");
     app.input.send("\x1b"); await frameContains(app, "0 mounted");
   } finally { await cleanup(app, db); bridge.close(); }

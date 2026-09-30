@@ -291,6 +291,10 @@ export function readDashboardAnalytics(
     reachable: number;
     error: string | null;
   }>;
+  // Runs open a row unfinished; one older than two hours was interrupted, not running.
+  const ingesting = db.prepare(
+    `SELECT 1 FROM ingest_runs WHERE finished_at IS NULL AND started_at >= ? LIMIT 1`,
+  ).get(now - 7_200_000) !== null;
   const hourlySessions = Array.from({ length: 12 }, () => 0);
   let scannedSessions = 0;
   let scanMs = 0;
@@ -376,7 +380,9 @@ export function readDashboardAnalytics(
     models,
     sizes,
     ingest: {
-      sessionsPerSecond: scanMs > 0 ? scannedSessions / (scanMs / 1000) : null,
+      // The day's scan throughput, shown only while a run is open: an idle
+      // archive reads "idle", not a stale rate that looks live.
+      sessionsPerSecond: ingesting && scanMs > 0 ? scannedSessions / (scanMs / 1000) : null,
       hourlySessions,
     },
     summarizer: {

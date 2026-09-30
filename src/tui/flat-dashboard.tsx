@@ -684,16 +684,16 @@ export function commandLine(width: number, input: string | null, message: string
   // the two ways into everything else.
   const shortcuts: Array<[string, string]> = width >= 80 ? [["/", "search"], ["?", "help"]] : [["?", "help"], ["esc", "back"]];
   const right: Span[] = shortcuts.flatMap(([key, label], index): Span[] => [...(index > 0 ? [["   "] as Span] : []), [key, SKIN.accent], [` ${label}`, SKIN.dim]]);
-  // Footer control cells match dashboardFooterControls: six and twelve cells,
+  // Footer control cells match dashboardFooterControls: six and eight cells,
   // one apart, ending one cell before the right edge.
-  if (width >= 80) right.push(["    "], [" undo ", SKIN.chip], [" "], [" processing ", SKIN.chip]);
+  if (width >= 80) right.push(["    "], [" undo ", SKIN.chip], [" "], [" status ", SKIN.chip]);
   const prompt: Span = input !== null ? [input, SKIN.text] : message ? [asciiLabel(message), SKIN.muted] : ["_", SKIN.dim];
   return compose(width, [[">", SKIN.accent], [" "], prompt], right, 1, "right");
 }
 
 function dashboardFooterControls(width: number, y: number): { undo: { x: number; y: number; width: number; height: number }; processing: { x: number; y: number; width: number; height: number } } {
   const undoWidth = 6;
-  const processingWidth = 12;
+  const processingWidth = 8;
   const start = Math.max(1, width - undoWidth - processingWidth - 2);
   return { undo: { x: start, y, width: undoWidth, height: 1 }, processing: { x: start + undoWidth + 1, y, width: processingWidth, height: 1 } };
 }

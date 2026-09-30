@@ -85,7 +85,8 @@ test("dashboard analytics are filter-aware and come only from persisted facts", 
     expect(result.tags).toEqual([{ label: "atlas-tui", count: 2 }]);
     expect(result.models.map((model) => model.label)).toEqual(["opus-4-6", "sonnet-4-5"]);
     expect(result.sizes.map((bucket) => bucket.count)).toEqual([1, 0, 1, 0]);
-    expect(result.ingest.sessionsPerSecond).toBeCloseTo(0.2);
+    // Every run finished: the archive is idle, whatever the day's throughput was.
+    expect(result.ingest.sessionsPerSecond).toBeNull();
     expect(result.ingest.hourlySessions.reduce((sum, value) => sum + value, 0)).toBe(3);
     expect(result.summarizer).toMatchObject({
       queue: 1,
@@ -97,6 +98,19 @@ test("dashboard analytics are filter-aware and come only from persisted facts", 
     expect(result.events.map((event) => event.label)).toContain("ingest claude +2");
     expect(result.events.some((event) => event.label.includes("root busy"))).toBe(true);
     expect(result.events.some((event) => event.label.includes("timeout"))).toBe(true);
+  } finally {
+    db.close();
+  }
+});
+
+test("ingest rate shows only while a run is open; an interrupted run older than two hours is not live", () => {
+  const db = fixture();
+  try {
+    const open = db.prepare(`INSERT INTO ingest_runs(source,root,started_at,reachable) VALUES ('claude','/src',?,0)`);
+    open.run(NOW - 3 * 3_600_000);
+    expect(readDashboardAnalytics(db, {}, NOW).ingest.sessionsPerSecond).toBeNull();
+    open.run(NOW - 5_000);
+    expect(readDashboardAnalytics(db, {}, NOW).ingest.sessionsPerSecond).toBeCloseTo(0.2);
   } finally {
     db.close();
   }
