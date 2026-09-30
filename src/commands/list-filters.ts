@@ -1,9 +1,9 @@
 import type { ChainFilter, ListFilter, SessionStateFilter } from "../data-access/session-list.js";
-import type { SessionOrigin } from "../adapters/types.js";
+import type { OriginLens } from "../adapters/types.js";
 import { flagValue, hasFlag } from "./ctx.js";
 
 const STATE_VALUES = new Set<SessionStateFilter>(["indexed", "orphaned", "summarized", "unsummarized", "pending", "failed"]);
-const ORIGIN_VALUES = new Set<SessionOrigin>(["human", "agent", "mixed", "unknown"]);
+const ORIGIN_VALUES = new Set<OriginLens>(["human", "agent", "mixed", "unknown", "empty"]);
 const VALUED_FLAGS = new Set([
   "--config", "--limit", "--query", "--source", "--harness", "--model",
   "--path", "--project", "--tag", "--from", "--to", "--state", "--chain", "--origin",
@@ -41,10 +41,10 @@ export function parseListFilters(argv: string[]): ParsedListFilters {
 
   const origin = flagValue(argv, "--origin");
   if (origin) {
-    if (!ORIGIN_VALUES.has(origin as SessionOrigin)) {
+    if (!ORIGIN_VALUES.has(origin as OriginLens)) {
       return { filter, positionals: positionalArgs(argv), error: `invalid --origin ${origin}` };
     }
-    filter.origin = origin as SessionOrigin;
+    filter.origin = origin as OriginLens;
   }
 
   const chain = flagValue(argv, "--chain");

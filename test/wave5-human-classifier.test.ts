@@ -184,9 +184,9 @@ test("apply writes promotions and conservative defaults without altering origin"
   expect(collectHumanCandidates(db, { limit: 20 })).toEqual([]);
 });
 
-function evidence(id: number, startedBy: "human" | "agent" | "unknown"): void {
+function evidence(id: number, startedBy: "human" | "agent" | "unknown", humanTurns = 1): void {
   db.prepare(`INSERT INTO layers.session_creator(harness,native_id,session_id,started_by,confidence,evidence,human_turns,agent_turns,harness_turns,rule_version,computed_at)
-    SELECT harness,native_id,id,?,0.9,'fixture',0,0,0,1,1 FROM sessions WHERE id=?`).run(startedBy, id);
+    SELECT harness,native_id,id,?,0.9,'fixture',?,0,0,1,1 FROM sessions WHERE id=?`).run(startedBy, humanTurns, id);
 }
 function modelVerdict(id: number, startedBy: "human" | "agent"): void {
   db.prepare(`INSERT INTO layers.creator_model(harness,native_id,started_by,reason,model,decided_at)
@@ -205,10 +205,12 @@ test("effective creator: md's correction, then decided evidence, then the model'
   const unseenAgent = seed("agent", "Subagent task", Date.now() - 4);
   const unseenHuman = seed("human", "A personal note", Date.now() - 5);
   const unseenUnknown = seed("unknown", "Nothing yet", Date.now() - 6);
+  const shell = seed("human", "", Date.now() - 7);
   evidence(corrected, "agent"); correction(corrected, "human");
   evidence(evidenced, "agent"); modelVerdict(evidenced, "human");
   evidence(modelled, "unknown"); modelVerdict(modelled, "human");
   evidence(undecided, "unknown");
+  evidence(shell, "unknown", 0);
 
   const rows = db.prepare(
     `SELECT s.id, ${effectiveSessionOriginSql("s")} AS effective_origin FROM sessions s ORDER BY s.id`,
@@ -222,13 +224,16 @@ test("effective creator: md's correction, then decided evidence, then the model'
     { id: unseenAgent, effective_origin: "agent" },
     { id: unseenHuman, effective_origin: "human" },
     { id: unseenUnknown, effective_origin: "unknown" },
+    // No human or agent turn at all: nothing to judge, so it is its own bucket, not "unsure".
+    { id: shell, effective_origin: "empty" },
   ]);
-  const ids = (decision: "human" | "agent" | "unknown") => (db.prepare(
+  const ids = (decision: "human" | "agent" | "unknown" | "empty") => (db.prepare(
     `SELECT s.id FROM sessions s WHERE ${effectiveSessionOriginPredicate(decision, "s")} ORDER BY s.id`,
   ).all() as Array<{ id: number }>).map((row) => row.id);
   expect(ids("human")).toEqual([corrected, modelled, unseenHuman]);
   expect(ids("agent")).toEqual([evidenced, unseenAgent]);
   expect(ids("unknown")).toEqual([undecided, unseenUnknown]);
+  expect(ids("empty")).toEqual([shell]);
 });
 
 test("list human/agent/unknown filters use effective decisions while rows retain raw provenance", () => {

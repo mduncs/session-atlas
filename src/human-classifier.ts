@@ -51,7 +51,7 @@ export function effectiveSessionOriginSql(sessionAlias = "s"): string {
 }
 
 export function effectiveSessionOriginPredicate(
-  decision: "human" | "agent" | "unknown",
+  decision: "human" | "agent" | "unknown" | "empty",
   sessionAlias = "s",
 ): string {
   return creatorFilterSql(decision, sessionAlias);

@@ -171,7 +171,7 @@ export function dashboardRailInteractionZones({ layout, analytics, actions, offs
     zones.push({ id: "dashboard:rail:origin:all", rect: { x: offsetX, y, width: layout.leftWidth, height: 1 }, focusable: true, onEvent: activation(() => actions.onRemoveFilter?.("origin")) });
     y += 1;
     for (const origin of analytics.origins) {
-      zones.push({ id: `dashboard:rail:origin:${origin.label}`, rect: { x: offsetX, y, width: layout.leftWidth, height: 1 }, focusable: true, onEvent: activation(() => actions.onFilter?.({ kind: "origin", value: origin.label as "human" | "agent" | "mixed" | "unknown" })) });
+      zones.push({ id: `dashboard:rail:origin:${origin.label}`, rect: { x: offsetX, y, width: layout.leftWidth, height: 1 }, focusable: true, onEvent: activation(() => actions.onFilter?.({ kind: "origin", value: origin.label as "human" | "agent" | "mixed" | "unknown" | "empty" })) });
       y += 1;
     }
   }

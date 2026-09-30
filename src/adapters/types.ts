@@ -47,6 +47,8 @@ export type Role = "user" | "assistant" | "tool" | "system";
 
 /** Best-effort provenance derived only from durable harness metadata. */
 export type SessionOrigin = "human" | "agent" | "mixed" | "unknown";
+/** Filter lens over origins: adds the effective-creator "empty" bucket (no dialogue to judge). */
+export type OriginLens = SessionOrigin | "empty";
 
 /** Stable source evidence used by the replay-aware logical projection. */
 export type RecordIdentityKind = "uuid" | "record-id" | "message-id" | "none";

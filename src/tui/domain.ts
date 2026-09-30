@@ -36,7 +36,7 @@ export interface SessionRow {
   origin?: SessionOrigin;
   origin_detail?: string | null;
   /** Creator lens: md's correction, then the evidence layer; `unknown` shows as `?`. */
-  effective_origin?: "human" | "agent" | "unknown";
+  effective_origin?: "human" | "agent" | "unknown" | "empty";
   classification_confidence?: number | null;
   classification_reason?: string | null;
   classification_method?: string | null;

@@ -9,7 +9,7 @@ import type {
   TitleEvidenceDto,
   ToolActivityDto,
 } from "./construction.js";
-import type { SessionOrigin } from "../adapters/types.js";
+import type { OriginLens } from "../adapters/types.js";
 
 export interface SessionListItemDto {
   sessionKey: SessionKey;
@@ -77,7 +77,7 @@ export interface SearchFilterDto {
   chainStableKey: string | null;
   includeHidden: boolean;
   /** Effective Human/Agent lens; mixed/unknown remain raw provenance filters. */
-  origin?: SessionOrigin | null;
+  origin?: OriginLens | null;
 }
 
 export interface SearchRequestDto {

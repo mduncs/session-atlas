@@ -44,7 +44,7 @@ export interface SessionFacts {
   durationMs: number | null;
   tokens: { user: number; assistant: number; tool: number };
   /** Effective creator lens and its evidence, when the layers DB is attached. */
-  creator?: { value: "human" | "agent" | "unknown"; reason: string | null; method: string | null } | null;
+  creator?: { value: "human" | "agent" | "unknown" | "empty"; reason: string | null; method: string | null } | null;
 }
 
 /** Explicit legacy fixture shape. Production SessionView reads only readerTranscript. */
@@ -498,7 +498,7 @@ function aboutLines(props: SessionViewProps, layout: SessionSurfaceLayout, summa
   const creator = props.facts.creator;
   if (creator) rows.push({
     id: `session:${id}:creator`,
-    spans: [["started by ", SKIN.dim], [creator.value === "unknown" ? "? unsure" : creator.value, creator.value === "human" ? SKIN.accent : creator.value === "agent" ? SKIN.muted : SKIN.warn]],
+    spans: [["started by ", SKIN.dim], [creator.value === "unknown" ? "? unsure" : creator.value === "empty" ? "empty (no dialogue)" : creator.value, creator.value === "human" ? SKIN.accent : creator.value === "agent" ? SKIN.muted : SKIN.warn]],
     right: [["h flips", SKIN.dim]],
     run: props.onCreatorToggle,
   });

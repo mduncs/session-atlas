@@ -80,6 +80,7 @@ test("dashboard analytics are filter-aware and come only from persisted facts", 
       { label: "human", count: 1 },
       { label: "agent", count: 1 },
       { label: "unknown", count: 0 },
+      { label: "empty", count: 0 },
     ]);
     expect(result.states).toEqual({ summarized: 1, pending: 1, orphaned: 1, favorite: 1 });
     expect(result.tags).toEqual([{ label: "atlas-tui", count: 2 }]);

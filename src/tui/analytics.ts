@@ -214,7 +214,7 @@ export function readDashboardAnalytics(
      FROM filtered GROUP BY label`,
   ).all(...lens.params) as Array<{ label: string; count: number }>;
   const originCounts = new Map(originRows.map((row) => [row.label, Number(row.count)]));
-  const origins: CountDatum[] = ["human", "agent", "unknown"].map((label) => ({
+  const origins: CountDatum[] = ["human", "agent", "unknown", "empty"].map((label) => ({
     label,
     count: originCounts.get(label) ?? 0,
   }));

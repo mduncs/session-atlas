@@ -173,11 +173,13 @@ export interface CreatorVerdict {
   opener: string | null;
 }
 
-export const CREATOR_RULE_VERSION = 1;
+export const CREATOR_RULE_VERSION = 2;
 
 /** Launch metadata that means a program, not md, opened the session. */
 const WORKER_DETAIL = /(agentId|isSidechain|subagents-path|thread_spawn|rlm-child|parent_id|subagent|external-agent-transcript|subagent-path)/;
 const SCRIPTED_DETAIL = /(sdk|codex:source:exec)/;
+/** Codex's approval reviewer: it is handed another agent's transcript and asked to assess an action. */
+const APPROVAL_REVIEW = /^The following is the Codex agent history (whose request action you are assessing|added since your last approval assessment)/;
 
 /**
  * Decide who started a session from launch metadata plus the first record
@@ -212,6 +214,8 @@ export function decideCreator(input: CreatorInput, templated: ReadonlySet<string
   // SDK front-ends are scripts unless md keeps talking in them.
   if (SCRIPTED_DETAIL.test(detail) && !/direct-cli/.test(detail) && voicedFollowUps < 2) return result("agent", 0.85, [`launch:${detail}`]);
   if (!first) {
+    // v2: a session holding only approval-review prompts was opened by Codex, not md.
+    if (input.userRecords.some((record) => APPROVAL_REVIEW.test(record.text.trimStart()))) return result("agent", 0.97, ["codex:approval-review"]);
     return input.origin === "human"
       ? result("unknown", 0.4, [`launch:${detail || "none"}`, "no-dialogue"])
       : result("unknown", 0.2, ["no-dialogue"]);

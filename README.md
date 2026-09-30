@@ -276,8 +276,11 @@ harness metadata, and the list shows an effective `H`/`A` lens on top of it.
 That lens defaults to Agent for anything unreviewed, because raw metadata
 provenance turned out to be a weak signal in practice — a large majority of the
 sessions it marked human were nothing of the kind. Press `g` to cycle
-all/human/agent; `--origin human|agent` applies the same effective lens from the
-CLI, and `--origin mixed|unknown` remains available for diagnosing raw
+all/human/agent; `--origin human|agent|unknown|empty` applies the same effective
+lens from the CLI. `unknown` is the rail's `? unsure`: dialogue exists, but no
+rule or model could decide who opened it. `empty` holds sessions with no human
+or agent turn at all (opened and closed, or harness plumbing only), which have
+nothing to judge. `--origin mixed` remains available for diagnosing raw
 provenance.
 
 For a stricter lens there is an opt-in classifier, kept in its own auditable

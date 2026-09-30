@@ -936,7 +936,7 @@ export function App({ db, config, runtime, terminal, visibleRows = 40, fixedWidt
     if (!activeSessionSurface) return null;
     try {
       const row = db.query(`SELECT ${effectiveCreatorSql("s")} AS value, hc.reason AS reason, hc.method AS method FROM sessions s ${creatorJoinSql("s")} WHERE s.id=?`)
-        .get(activeSessionSurface.facts.id) as { value: "human" | "agent" | "unknown"; reason: string | null; method: string | null } | null;
+        .get(activeSessionSurface.facts.id) as { value: "human" | "agent" | "unknown" | "empty"; reason: string | null; method: string | null } | null;
       return row ? { ...activeSessionSurface.facts, creator: row } : activeSessionSurface.facts;
     } catch { return activeSessionSurface.facts; }
   }, [activeSessionSurface, db, layersRevision]);

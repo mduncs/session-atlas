@@ -1,4 +1,4 @@
-import type { SessionOrigin } from "../adapters/types.js";
+import type { OriginLens } from "../adapters/types.js";
 import type { SearchFilterDto, SearchRequestDto } from "../contracts/search.js";
 import { compileFtsQuery, type SearchSyntax } from "../fts-query.js";
 import { creatorFilterSql } from "../layers/creator-sql.js";
@@ -34,7 +34,7 @@ export interface ListFilter {
   favorite?: boolean | null;
   state?: SessionStateFilter | null;
   chain?: ChainFilter | null;
-  origin?: SessionOrigin | null;
+  origin?: OriginLens | null;
   /** Layer facet without its prefix (`design` means tag `facet:design`). */
   facet?: string | null;
   /** Layer detail tag (canonical identity); a parent also matches nested children. */
@@ -55,7 +55,7 @@ export type FilterTerm =
   | { kind: "favorite"; value: boolean }
   | { kind: "state"; value: SessionStateFilter }
   | { kind: "chain"; value: ChainFilter }
-  | { kind: "origin"; value: SessionOrigin }
+  | { kind: "origin"; value: OriginLens }
   | { kind: "facet"; value: string }
   | { kind: "layerTag"; value: string };
 
@@ -74,7 +74,7 @@ export interface NormalizedSessionFilter {
   includeHidden: boolean;
   state: SessionStateFilter | null;
   chain: ChainFilter | null;
-  origin: SessionOrigin | null;
+  origin: OriginLens | null;
   /** List-only provenance lens; absent and false both retain every origin. */
   hideAgentConversations?: boolean;
   /** Raw `layers.episode_tags` values (e.g. `facet:design`); each must match. */
@@ -298,7 +298,7 @@ export function compileSessionFilter(
     params.push(filter.chain.id);
   }
   if (filter.origin) {
-    if (filter.origin === "human" || filter.origin === "agent" || filter.origin === "unknown") {
+    if (filter.origin === "human" || filter.origin === "agent" || filter.origin === "unknown" || filter.origin === "empty") {
       predicates.push(creatorFilterSql(filter.origin, alias));
     } else {
       predicates.push(`${alias}.origin = ?`);
