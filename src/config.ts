@@ -17,7 +17,8 @@ export interface SourceConfig {
 export interface ProviderConfig {
   name: string;
   base: string;
-  kind: "anthropic" | "openai";
+  /** `claude-cli` runs headless `claude -p` on md's subscription; `base` and `key_env` are unused. */
+  kind: "anthropic" | "openai" | "claude-cli";
   model: string;
   key_env: string;
   /** Optional OpenAI-compatible reasoning control (for example DeepSeek V4). */
@@ -351,9 +352,13 @@ export async function loadConfig(path: string = DEFAULT_CONFIG_PATH, options: Lo
       if (thinking !== undefined && thinking !== "enabled" && thinking !== "disabled") {
         throw new ConfigError(`provider thinking must be 'enabled' or 'disabled'`);
       }
+      const kind = r.kind ?? "anthropic";
+      if (kind !== "anthropic" && kind !== "openai" && kind !== "claude-cli") {
+        throw new ConfigError(`provider kind must be 'anthropic', 'openai', or 'claude-cli'`);
+      }
       return {
         name: String(r.name ?? ""), base: String(r.base ?? ""),
-        kind: (r.kind as "anthropic" | "openai") ?? "anthropic",
+        kind,
         model: String(r.model ?? ""), key_env: String(r.key_env ?? ""),
         ...(thinking ? { thinking } : {}),
       };

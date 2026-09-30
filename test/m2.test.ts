@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDb, type DB } from "../src/db/index.js";
-import { summarizeSession, enqueueJob, buildProseTurns } from "../src/summarize.js";
+import { summarizeSession, enqueueJob, buildProseTurns, promoteTags } from "../src/summarize.js";
 import { HARNESS_IDS, type Config, type ProviderConfig } from "../src/config.js";
 import type { ProviderStatus } from "../src/provider.js";
 import { rebuildLogicalMetrics } from "../src/logical-metrics.js";
@@ -178,4 +178,23 @@ test("a tier-1 summary flagged stale is summarized again; an unflagged one is sk
   // No provider here, so the stale prose stays readable until a real replacement lands.
   expect(db.prepare(`SELECT topic_line, needs_revalidation FROM summaries WHERE session_id=? AND tier=1`).get(sid))
     .toEqual({ topic_line: "summary vanish trace", needs_revalidation: 1 });
+});
+
+test("promoteTags reports only first promotions; a rerun still links new sessions", async () => {
+  db = await openDb(dbPath);
+  const sid = seedSession(db, "Tag promotion fixture.");
+  const candidate = db.prepare(`INSERT INTO tag_candidates(name, session_id) VALUES (?, ?)`);
+  const others = [0, 1].map((n) => Number((db.prepare(
+    `INSERT INTO sessions(harness,native_id,source_path,ingested_at,msg_count,transcript_bytes,orphaned,artifact_kind,history_completeness,construction_generation,construction_status,default_session_visible,source_validation_status,source_observed_ts)
+     VALUES ('claude',?,'x',1,0,0,0,'dialogue_history','complete',?,'valid',1,'current',1)`,
+  ).run(`t${n}`, `g${n}`) as { lastInsertRowid: number | bigint }).lastInsertRowid));
+  for (const id of [sid, ...others]) candidate.run("atlas", id);
+  expect(promoteTags(db, 3).promoted).toEqual(["atlas"]);
+  const late = Number((db.prepare(
+    `INSERT INTO sessions(harness,native_id,source_path,ingested_at,msg_count,transcript_bytes,orphaned,artifact_kind,history_completeness,construction_generation,construction_status,default_session_visible,source_validation_status,source_observed_ts)
+     VALUES ('claude','late','x',1,0,0,0,'dialogue_history','complete','gl','valid',1,'current',1)`,
+  ).run() as { lastInsertRowid: number | bigint }).lastInsertRowid);
+  candidate.run("atlas", late);
+  expect(promoteTags(db, 3).promoted).toEqual([]);
+  expect(db.prepare(`SELECT COUNT(*) n FROM session_tags`).get()).toEqual({ n: 4 });
 });

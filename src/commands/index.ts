@@ -17,7 +17,12 @@ export async function indexCmd(argv:string[],options:IndexCommandOptions={}):Pro
       const enabled=HARNESS_IDS.filter(source=>resolvedSourceConfig(config,source).mode!=="disabled").length;
       process.stdout.write(`${operation} · full reconciliation · ${enabled} enabled source(s) · provider-free\n`);
       const summaries=await ingest(db,config,{full,trigger:scheduled?"scheduled":"manual",configPath,storageProbe:options.storageProbe,onSourceComplete:printSummary,onProgress:progress=>process.stdout.write(`atlas index · ${progress.source} · ${progress.processed}/${progress.total} identities · rss ${formatMiB(process.memoryUsage().rss)} MiB…\n`)});
-      healthy=summaries.filter(summary=>summary.mode!=="disabled").every(summary=>summary.uniqueIdentities!==null);
+      const incomplete=summaries.filter(summary=>summary.mode!=="disabled"&&summary.uniqueIdentities===null);
+      // A live root (the active Claude projects dir) often changes mid-walk. Everything seen was
+      // published; only orphan marking waits for a stable walk, so that alone is not a failure.
+      const churnOnly=incomplete.length>0&&incomplete.every(walkChurnOnly);
+      healthy=incomplete.length===0||churnOnly;
+      if(churnOnly)process.stdout.write(`atlas index · ${incomplete.map(summary=>summary.source).join(", ")} changed during walk · published, orphan marking deferred to the next run\n`);
       const favorites=retryPendingFavorites(db,{defaultSpan:config.tunables.fav_default_span});
       if(favorites.materialized>0)process.stdout.write(`atlas index · materialized ${favorites.materialized} pending favorite(s)\n`);
       refreshLayers(db,dbPath,(line)=>process.stdout.write(`atlas index · ${line}\n`));
@@ -30,6 +35,9 @@ export async function indexCmd(argv:string[],options:IndexCommandOptions={}):Pro
     return 1;
   }
   return healthy?0:1;
+}
+export function walkChurnOnly(s:Awaited<ReturnType<typeof ingest>>[number]):boolean{
+  return s.roots.length>0&&s.roots.every(root=>root.reachable&&!root.error&&(root.unitErrors??0)===0)&&s.roots.some(root=>root.changedDuringWalk===true);
 }
 function formatMiB(bytes:number):string{return (bytes/(1024*1024)).toFixed(0);}
 function printSummary(s:Awaited<ReturnType<typeof ingest>>[number]):void{

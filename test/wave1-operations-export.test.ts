@@ -120,6 +120,11 @@ test("Wave 1 operations — preview is the exact pass-1 size and the four-pass l
   const preview = previewExport(db, config, scope, { budget: 100_000 });
   expect(preview.predictedTokens).toBe(full.finalTokens);
   expect(full.pass).toBe(1);
+  // The preview shows the payload's opening lines, verbatim and control-free.
+  expect(preview.excerpt.length).toBeGreaterThan(0);
+  expect(preview.excerpt.length).toBeLessThanOrEqual(40);
+  expect(full.content.startsWith(preview.excerpt.slice(0, 3).join("\n"))).toBe(true);
+  expect(preview.excerpt.join("\n")).not.toMatch(/[\u0000-\u0008\u000b-\u001f]/);
 
   let pass2: ReturnType<typeof compileExport> | null = null;
   for (let budget = preview.minimumTokens; budget < preview.predictedTokens; budget++) {

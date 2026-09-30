@@ -17,7 +17,8 @@ const REFUSAL_PATTERNS: RegExp[] = [
   /(?:content|safety) (?:policy|guidelines|filter)/i,
   /I(?:'m| am) (?:programmed|designed|configured) (?:not|to decline)/i,
   /(?:politically|politically-)?(?:sensitive|controversial) topic/i,
-  /(?: violates? | breach(?:es|ing)? )?(?:applicable )?(?:laws?|regulations|terms)/i,
+  // The verb is required: bare "law"/"terms" matched topic lines about flaws, lawns, and clawd.
+  /\b(?:violates?|breach(?:es|ing)?) (?:the )?(?:applicable )?(?:laws?|regulations|terms)\b/i,
   /(?:请|抱歉|对不起|我无法|我不能|涉及|违反|敏感话题|政治|根据相关规定)/, // Chinese refusal shapes
 ];
 

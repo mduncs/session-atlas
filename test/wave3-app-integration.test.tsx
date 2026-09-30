@@ -297,6 +297,7 @@ test("mounted export previews two launchers, Esc writes nothing, and confirm wri
     expect(app.view.lastFrame()).toContain("Claude");
     expect(app.view.lastFrame()).toContain("Codex");
     expect(app.view.lastFrame()).toContain("predicted");
+    expect(app.view.lastFrame()).toContain("PAYLOAD · first lines");
     expect(existsSync(join(value.root, "exports"))).toBe(false);
     app.input.send("\x1b"); await frameContains(app, "export cancelled - no file written");
     expect(existsSync(join(value.root, "exports"))).toBe(false);

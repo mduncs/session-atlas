@@ -93,6 +93,8 @@ export interface SummarizeOptions {
   signal?: AbortSignal;
   /** Generation guard supplied by a TaskSupervisor-owned task. */
   shouldCommit?: () => boolean;
+  /** Receives the usage snapshot a `claude-cli` provider reports. */
+  onUsage?: (snapshot: import("./layers/usage-gate.js").UsageSnapshot) => void;
 }
 
 /**
@@ -139,7 +141,7 @@ export async function summarizeSession(
 
   const status = await callChain(
     config.providers,
-    { system: TIER1_SYSTEM, turns, maxTokens: TIER1_MAX_TOKENS, signal: opts.signal },
+    { system: TIER1_SYSTEM, turns, maxTokens: TIER1_MAX_TOKENS, signal: opts.signal, onUsage: opts.onUsage },
     (text) => classifyTier1(text),
   );
 
@@ -250,12 +252,13 @@ export function promoteTags(db: DB, promotionCount: number): { promoted: string[
       `INSERT INTO session_tags(session_id, tag_id) SELECT DISTINCT c.session_id, ? FROM tag_candidates c WHERE c.name=? ON CONFLICT DO NOTHING`,
     );
     for (const c of candidates) {
+      // Every qualifying tag is re-linked (new sessions join it); only a first insert counts as a promotion.
       if ((tagId.get(c.name) as { id: number } | null) === null) {
         insTag.run(c.name, now);
+        promoted.push(c.name);
       }
       const tid = (tagId.get(c.name) as { id: number }).id;
       link.run(tid, c.name);
-      promoted.push(c.name);
     }
   });
   tx();

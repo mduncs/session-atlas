@@ -1,6 +1,9 @@
+import type { Database } from "bun:sqlite";
 import { withCtx, flagValue, hasFlag } from "./ctx.js";
 import { summarizeSession, promoteTags, enqueueJob, tier1PromptVersion } from "../summarize.js";
 import { bumpLastWrite } from "../db/index.js";
+import { creatorFilterSql, type EffectiveCreator } from "../layers/creator-sql.js";
+import { DEFAULT_USAGE_THRESHOLD, gateDecision, readGate, writeGate } from "../layers/usage-gate.js";
 
 const RATE_MS = 600; // polite spacing between provider calls during backfill
 
@@ -11,6 +14,10 @@ const RATE_MS = 600; // polite spacing between provider calls during backfill
  *   atlas summarize --backfill --limit N
  *   atlas summarize --redo             re-run where prompt/model differ
  *   atlas summarize --redo --older-than 30d --model-was glm-4.5-air
+ *   atlas summarize --backfill --origin human   only one effective-creator lens
+ *
+ * A `claude-cli` provider shares the layer jobs' usage gate: no call is issued
+ * while a five-hour or seven-day window is at 95%; the run sleeps until reset.
  */
 export async function summarizeCmd(argv: string[]): Promise<number> {
   const backfill = hasFlag(argv, "--backfill");
@@ -22,21 +29,41 @@ export async function summarizeCmd(argv: string[]): Promise<number> {
   const olderThan = flagValue(argv, "--older-than");
   const concurrency = parseConcurrency(flagValue(argv, "--concurrency"));
   const sessionArg = argv.find((a) => !a.startsWith("-") && !Number.isNaN(Number(a)));
+  const origin = flagValue(argv, "--origin") ?? null;
+  if (origin !== null && !["human", "agent", "unknown", "empty"].includes(origin)) {
+    throw new RangeError("--origin must be human, agent, unknown, or empty");
+  }
 
   await withCtx(argv, async ({ db, config }) => {
+    // A backfill runs for minutes beside the scheduled index, whose publication chunks can hold
+    // the write lock far longer than the 5 s default; wait for it rather than die mid-write.
+    db.exec("PRAGMA busy_timeout = 120000;");
     let ids: number[] = [];
     if (backfill || redo) {
-      ids = collectBackfillIds(db, { redo, limit, modelWas: modelWas ?? null, olderThan: olderThan ?? null });
+      ids = collectBackfillIds(db, { redo, limit, modelWas: modelWas ?? null, olderThan: olderThan ?? null, origin: origin as EffectiveCreator | null });
     } else if (sessionArg) {
       ids = [Number(sessionArg)];
     } else {
       // Default: summarize the N newest unsummarized.
-      ids = collectBackfillIds(db, { redo: false, limit, modelWas: null, olderThan: null });
+      ids = collectBackfillIds(db, { redo: false, limit, modelWas: null, olderThan: null, origin: origin as EffectiveCreator | null });
     }
     process.stdout.write(
       `atlas summarize · prompt v${tier1PromptVersion()} · ${ids.length} session(s) · ` +
         `${config.providers.map((p) => p.name).join(" → ")} · concurrency ${concurrency}\n`,
     );
+
+    const gated = config.providers.some((provider) => provider.kind === "claude-cli");
+    const layers = db as unknown as Database;
+    const waitForGate = async () => {
+      if (!gated) return;
+      for (;;) {
+        const gate = gateDecision(readGate(layers), DEFAULT_USAGE_THRESHOLD);
+        if (gate.ok) return;
+        process.stdout.write(`  usage ${gate.reason} ≥ ${Math.round(DEFAULT_USAGE_THRESHOLD * 100)}% · paused until ${new Date(gate.untilMs).toLocaleString()}\n`);
+        await sleep(Math.max(1_000, gate.untilMs - Date.now()));
+      }
+    };
+    const onUsage = gated ? (snapshot: Parameters<typeof writeGate>[1]) => writeGate(layers, snapshot) : undefined;
 
     let ok = 0,
       pending = 0,
@@ -50,7 +77,8 @@ export async function summarizeCmd(argv: string[]): Promise<number> {
         if (index >= ids.length) return;
         const id = ids[index]!;
         try {
-          const out = await summarizeSession(db, config, id, { redo });
+          await waitForGate();
+          const out = await summarizeSession(db, config, id, { redo, onUsage });
           completed++;
           if (out.status === "summarized") {
             ok++;
@@ -97,7 +125,7 @@ function parseConcurrency(raw: string | undefined): number {
 
 function collectBackfillIds(
   db: import("../db/index.js").DB,
-  opts: { redo: boolean; limit: number; modelWas: string | null; olderThan: string | null },
+  opts: { redo: boolean; limit: number; modelWas: string | null; olderThan: string | null; origin: EffectiveCreator | null },
 ): number[] {
   if (opts.redo) {
     const clauses: string[] = [];
@@ -113,6 +141,7 @@ function collectBackfillIds(
         params.push(Date.now() - days * 86_400_000);
       }
     }
+    if (opts.origin) clauses.push(creatorFilterSql(opts.origin, "se"));
     const where = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
     return (
       db
@@ -131,6 +160,7 @@ function collectBackfillIds(
          JOIN construction_metrics cm ON cm.session_id=s.id AND cm.construction_generation=s.construction_generation
          LEFT JOIN summaries sm ON sm.session_id=s.id AND sm.tier=1
          WHERE (sm.id IS NULL OR sm.needs_revalidation=1) AND s.construction_status='valid' AND cm.dialogue_turn_count > 0
+           ${opts.origin ? `AND ${creatorFilterSql(opts.origin, "s")}` : ""}
          ORDER BY s.last_activity DESC LIMIT ?`,
       )
       .all(opts.limit) as { id: number }[]

@@ -1280,6 +1280,11 @@ function ExportOverlay({ state, choice, width, height }: { state: ExportFlowStat
     <Text color={state.compressionNeeded ? "yellow" : "green"}>{state.compressionNeeded ? "compression ladder will run on confirm" : "pass 1 fits without compression"}</Text>
     <Text dimColor>Choose continuation · ↑↓ · Enter confirm · Esc cancel</Text>
     {state.choices.map((item, index) => <Text key={item.name ?? "none"} color={index === choice ? "#ff9800" : "white"}>{index === choice ? "▌" : " "} {item.label}</Text>)}
+    {/* Border (2) + six header lines + choices + the PAYLOAD title leave the rest for the excerpt. */}
+    {height - 9 - state.choices.length > 0 && state.preview.excerpt.length > 0 ? <>
+      <Text bold color="#ff9800">PAYLOAD · first lines</Text>
+      {state.preview.excerpt.slice(0, height - 9 - state.choices.length).map((line, index) => <Text key={`excerpt-${index}`} color="#b8b8b8" wrap="truncate-end">{line || " "}</Text>)}
+    </> : null}
   </Box>;
 }
 

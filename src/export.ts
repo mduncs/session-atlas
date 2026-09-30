@@ -31,6 +31,17 @@ export interface ExportPreview {
   minimumTokens: number;
   budget: number;
   overBudgetBy: number;
+  /** Opening lines of the pass-1 payload, so a preview shows what the next agent will read. */
+  excerpt: string[];
+}
+
+const EXCERPT_LINES = 40;
+const EXCERPT_COLUMNS = 400;
+
+function payloadExcerpt(payload: string): string[] {
+  return payload.split("\n").slice(0, EXCERPT_LINES)
+    // Control characters (ANSI, carriage returns) would corrupt the terminal preview.
+    .map((line) => line.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").replace(/\t/g, "  ").slice(0, EXCERPT_COLUMNS));
 }
 
 export interface CompiledExport extends ExportPreview {
@@ -90,6 +101,7 @@ export function previewExport(
     minimumTokens,
     budget,
     overBudgetBy: Math.max(0, minimumTokens - budget),
+    excerpt: payloadExcerpt(full),
   };
 }
 
@@ -109,6 +121,7 @@ export function compileExport(
     sessionCount: resolved.sessions.length,
     predictedTokens,
     budget,
+    excerpt: payloadExcerpt(pass1),
   };
   if (predictedTokens <= budget) {
     return finish(base, pass1, 1, [], estimateTokens(renderPayload(resolved, "none", new Set(), options.launcher)));

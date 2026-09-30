@@ -11,10 +11,15 @@
  * building the body. Grep-provable: `rg -n 'fetch\(' src/provider.ts` shows
  * exactly one site; every caller goes through `callChain()`.
  *
- * No SDK: plain fetch against Anthropic- or OpenAI-compatible endpoints.
+ * No SDK: plain fetch against Anthropic- or OpenAI-compatible endpoints. The
+ * `claude-cli` kind is the one non-fetch transport: headless `claude -p` on
+ * md's subscription, fed the same redacted turns and gated by the 95% usage
+ * snapshot the caller persists through `onUsage`.
  */
 import type { ProviderConfig } from "./config.js";
 import { redactTurns, type RedactableTurn } from "./redact.js";
+import { claudeHeadless, type ModelCaller } from "./layers/model-call.js";
+import type { UsageSnapshot } from "./layers/usage-gate.js";
 
 export type ProviderStatus =
   | { ok: true; text: string; provider: string; model: string }
@@ -34,6 +39,14 @@ export interface ChainCall {
   maxTokens: number;
   /** Caller-owned cancellation (view close, app exit, or command abort). */
   signal?: AbortSignal;
+  /** `claude-cli` only: the rate-limit snapshot each call reports. */
+  onUsage?: (snapshot: UsageSnapshot) => void;
+}
+
+/** Test seam for the `claude-cli` transport. */
+let cliCaller: ModelCaller = claudeHeadless;
+export function setClaudeCliCaller(caller: ModelCaller | null): void {
+  cliCaller = caller ?? claudeHeadless;
 }
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -49,6 +62,10 @@ export function providerReadiness(
   provider: ProviderConfig,
   env: Record<string, string | undefined> = process.env,
 ): ProviderReadiness {
+  if (provider.kind === "claude-cli") {
+    const bin = env.ATLAS_CLAUDE_BIN ?? "claude";
+    return Bun.which(bin) ? { ready: true, reason: null } : { ready: false, reason: `claude CLI not found (${bin})` };
+  }
   if (isKnownCodingPlanEndpoint(provider.base) && env[UNSUPPORTED_PROVIDER_OVERRIDE] !== "1") {
     return { ready: false, reason: `Coding Plan endpoint blocked for custom-app traffic; use a permitted general API or set ${UNSUPPORTED_PROVIDER_OVERRIDE}=1 after provider authorization` };
   }
@@ -91,8 +108,7 @@ export async function callChain(
       fellThrough.push({ provider: p.name, reason: readiness.reason ?? "provider unavailable" });
       continue;
     }
-    const key = env[p.key_env]!;
-    const res = await sendRequest(p, key, call);
+    const res = p.kind === "claude-cli" ? await sendCli(p, call) : await sendRequest(p, env[p.key_env]!, call);
     if (!res.ok) {
       if (res.cancelled) {
         return { ok: false, reason: "cancelled", fellThrough, cancelled: true };
@@ -199,6 +215,27 @@ async function sendRequest(p: ProviderConfig, key: string, call: ChainCall): Pro
     clearTimeout(timer);
     call.signal?.removeEventListener("abort", abortFromCaller);
   }
+}
+
+/** The `claude-cli` transport. Redacts before rendering, exactly like sendRequest. */
+async function sendCli(p: ProviderConfig, call: ChainCall): Promise<SendResult> {
+  const transcript = redactTurns(call.turns)
+    .filter((t) => t.text !== null || t.toolText)
+    .map((t) => `[${t.role === "assistant" ? "assistant" : "user"}]\n${[t.text, t.toolText].filter(Boolean).join("\n")}`)
+    .join("\n\n");
+  const result = await cliCaller({
+    model: p.model,
+    system: call.system,
+    prompt: `<transcript>\n${transcript}\n</transcript>`,
+    thinking: false,
+    signal: call.signal,
+  });
+  if (result.snapshot) call.onUsage?.(result.snapshot);
+  if (call.signal?.aborted) return { ok: false, text: "", reason: "cancelled", cancelled: true };
+  if (result.limited) return { ok: false, text: "", reason: `usage limit: ${result.error ?? "rejected"}` };
+  if (!result.ok) return { ok: false, text: "", reason: `claude-cli: ${result.error}` };
+  if (!result.text.trim()) return { ok: false, text: "", reason: "empty content" };
+  return { ok: true, text: result.text };
 }
 
 function buildBody(

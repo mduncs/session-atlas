@@ -376,13 +376,13 @@ test("Claude candidate bytes count semantic envelopes, not metadata volume", () 
 
 test("legacy flat project workers require matching structured agent and sole parent identity", () => {
   const base = root("flat-worker");
-  const src = source(base, "agent-a9c8151", "project/agent-a9c8151.jsonl");
-  const worker = message("user", "worker fixture", 1, { sessionId: uuid(90), agentId: "a9c8151", isSidechain: true });
+  const src = source(base, "agent-f00d5e7", "project/agent-f00d5e7.jsonl");
+  const worker = message("user", "worker fixture", 1, { sessionId: uuid(90), agentId: "f00d5e7", isSidechain: true });
   write(src, [worker]);
   const admitted = claudeAdapter.admit!(src);
   expect(admitted.admitted).toBe(true);
   if (admitted.admitted) {
-    expect(admitted.record.nativeId).toBe("agent-a9c8151");
+    expect(admitted.record.nativeId).toBe("agent-f00d5e7");
     expect(admitted.record.origin).toBe("agent");
   }
   for (const records of [

@@ -59,7 +59,10 @@ export async function exportCmd(argv: string[]): Promise<number> {
           (before.predictedTokens > before.budget ? ` · compression required` : "") +
           "\n",
       );
-      if (previewOnly) return;
+      if (previewOnly) {
+        process.stdout.write(`payload · first ${before.excerpt.length} lines\n${before.excerpt.map((line) => `  ${line}`).join("\n")}\n`);
+        return;
+      }
       const written = await writeExport(db, config, scope, { budget, launcher });
       process.stdout.write(
         `export → ${written.path} · ${written.finalTokens} tokens · pass ${written.pass}\n` +
