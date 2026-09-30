@@ -19,7 +19,7 @@ export function ensureWork(db:DB,input:WorkInput,state:"pending"|"blocked"="pend
   }
   return work.id;
  };
- return db.inTransaction?apply():db.transaction(apply)();
+ return db.inTransaction?apply():db.transaction(apply).immediate();
 }
 
 /** Recover expired leases, then claim at most one runnable work row atomically. */
@@ -35,9 +35,9 @@ export function claimWork(db:DB,options:ClaimOptions={}):WorkRow|null{
   const ordinal=candidate.attempt_count+1,expires=now+leaseMs;const changed=db.prepare(`UPDATE job_work SET current_status='running',attempt_count=?,owner_token=?,claimed_at=?,heartbeat_at=?,lease_expires_at=?,next_attempt_at=NULL,blocked_reason=NULL,updated_at=? WHERE id=? AND current_status='pending'`).run(ordinal,owner,now,now,expires,now,candidate.id).changes;if(!changed)return null;
   const inputRevision=currentInputRevision(db,candidate.id);db.prepare(`INSERT INTO job_attempts(work_id,attempt_ordinal,status,input_revision,owner_token,claimed_at,heartbeat_at,lease_expires_at,started_at,created_at) VALUES (?,?,'running',?,?,?,?,?,?,?)`).run(candidate.id,ordinal,inputRevision,owner,now,now,expires,now,now);
   return readWork(db,candidate.id,inputRevision);
- };return db.inTransaction?apply():db.transaction(apply)();
+ };return db.inTransaction?apply():db.transaction(apply).immediate();
 }
-export function heartbeatWork(db:DB,workId:number,owner:string,now=Date.now(),leaseMs=10*60_000):boolean{const expires=now+leaseMs;const apply=()=>{const changed=Number(db.prepare(`UPDATE job_work SET heartbeat_at=?,lease_expires_at=?,updated_at=? WHERE id=? AND current_status='running' AND owner_token=? AND lease_expires_at>?`).run(now,expires,now,workId,owner,now).changes);if(changed)db.prepare(`UPDATE job_attempts SET heartbeat_at=?,lease_expires_at=? WHERE work_id=? AND status='running' AND owner_token=?`).run(now,expires,workId,owner);return changed===1;};return db.inTransaction?apply():db.transaction(apply)();}
+export function heartbeatWork(db:DB,workId:number,owner:string,now=Date.now(),leaseMs=10*60_000):boolean{const expires=now+leaseMs;const apply=()=>{const changed=Number(db.prepare(`UPDATE job_work SET heartbeat_at=?,lease_expires_at=?,updated_at=? WHERE id=? AND current_status='running' AND owner_token=? AND lease_expires_at>?`).run(now,expires,now,workId,owner,now).changes);if(changed)db.prepare(`UPDATE job_attempts SET heartbeat_at=?,lease_expires_at=? WHERE work_id=? AND status='running' AND owner_token=?`).run(now,expires,workId,owner);return changed===1;};return db.inTransaction?apply():db.transaction(apply).immediate();}
 export function finishWork(db:DB,workId:number,owner:string,status:"done"|"failed",error:string|null=null,options:{now?:number;attemptLimit?:number}={}):boolean{
  const now=options.now??Date.now(),limit=options.attemptLimit??5;const apply=()=>{const work=db.prepare(`SELECT attempt_count,target_harness,target_native_id,input_version FROM job_work WHERE id=? AND current_status='running' AND owner_token=?`).get(workId,owner) as {attempt_count:number;target_harness:string;target_native_id:string;input_version:string}|null;if(!work)return false;const attempt=db.prepare(`SELECT input_revision FROM job_attempts WHERE work_id=? AND status='running' AND owner_token=? ORDER BY attempt_ordinal DESC LIMIT 1`).get(workId,owner) as {input_revision:string}|null;if(!attempt)return false;
   if(!inputStillCurrent(db,work.target_harness,work.target_native_id,attempt.input_revision)){db.prepare(`UPDATE job_attempts SET status='superseded',error='stale input revision',finished_at=? WHERE work_id=? AND status='running' AND owner_token=?`).run(now,workId,owner);db.prepare(`UPDATE job_work SET current_status='superseded',current_error='stale input revision',owner_token=NULL,claimed_at=NULL,heartbeat_at=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?`).run(now,workId);return false;}
@@ -45,7 +45,7 @@ export function finishWork(db:DB,workId:number,owner:string,status:"done"|"faile
   if(status==="done")db.prepare(`UPDATE job_work SET current_status='done',current_error=NULL,blocked_reason=NULL,owner_token=NULL,claimed_at=NULL,heartbeat_at=NULL,lease_expires_at=NULL,next_attempt_at=NULL,updated_at=? WHERE id=?`).run(now,workId);
   else if(work.attempt_count>=limit)db.prepare(`UPDATE job_work SET current_status='failed',current_error=?,owner_token=NULL,claimed_at=NULL,heartbeat_at=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?`).run(error,now,workId);
   else db.prepare(`UPDATE job_work SET current_status='pending',current_error=?,owner_token=NULL,claimed_at=NULL,heartbeat_at=NULL,lease_expires_at=NULL,next_attempt_at=?,updated_at=? WHERE id=?`).run(error,now+backoffMs(work.attempt_count),now,workId);
-  return true;};return db.inTransaction?apply():db.transaction(apply)();
+  return true;};return db.inTransaction?apply():db.transaction(apply).immediate();
 }
 export function blockWork(db:DB,input:WorkInput,reason="no provider configured or authorized"):number{return ensureWork(db,input,"blocked",reason);}
 export function newestRelevantError(db:DB,workId:number):string|null{return (db.prepare(`SELECT error FROM job_attempts WHERE work_id=? AND error IS NOT NULL ORDER BY attempt_ordinal DESC,id DESC LIMIT 1`).get(workId) as {error:string}|null)?.error??null;}

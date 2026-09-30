@@ -205,7 +205,8 @@ export async function summarizeSession(
     bumpLastWrite(db);
     committed = true;
   });
-  tx();
+  // IMMEDIATE takes the write lock up front: a deferred read-then-write fails at once (no busy wait) when the index committed in between.
+  tx.immediate();
   if (!committed) return { sessionId, status: "skipped", reason: "summary input became stale before commit" };
   return { sessionId, status: "summarized", provider: status.provider };
 }
@@ -261,7 +262,7 @@ export function promoteTags(db: DB, promotionCount: number): { promoted: string[
       link.run(tid, c.name);
     }
   });
-  tx();
+  tx.immediate();
   return { promoted };
 }
 

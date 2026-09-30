@@ -245,7 +245,7 @@ export function persistTier2Result(db: DB, input: PersistTier2Input): number {
     bumpLastWrite(db);
     return summaryId;
   });
-  return tx();
+  return tx.immediate();
 }
 
 function degradedOutcome(
@@ -366,7 +366,7 @@ export function checkStaleness(db: DB, sessionId: number, stalePct: number): Sta
       enqueueJob(db, sessionId, "tier1", `stale: grew ${growthPct.toFixed(0)}% past covered`);
       bumpLastWrite(db);
     });
-    tx();
+    tx.immediate();
   }
 
   return { stale, covered, current, growthPct };
