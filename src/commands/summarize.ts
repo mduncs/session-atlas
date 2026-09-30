@@ -17,7 +17,8 @@ const RATE_MS = 600; // polite spacing between provider calls during backfill
  *   atlas summarize --backfill --origin human   only one effective-creator lens
  *
  * A `claude-cli` provider shares the layer jobs' usage gate: no call is issued
- * while a five-hour or seven-day window is at 95%; the run sleeps until reset.
+ * while a five-hour or seven-day window is at the threshold (default 95%,
+ * `--threshold 0.8` leaves headroom); the run sleeps until reset.
  */
 export async function summarizeCmd(argv: string[]): Promise<number> {
   const backfill = hasFlag(argv, "--backfill");
@@ -33,6 +34,8 @@ export async function summarizeCmd(argv: string[]): Promise<number> {
   if (origin !== null && !["human", "agent", "unknown", "empty"].includes(origin)) {
     throw new RangeError("--origin must be human, agent, unknown, or empty");
   }
+  const threshold = Number(flagValue(argv, "--threshold") ?? DEFAULT_USAGE_THRESHOLD);
+  if (!(threshold > 0 && threshold <= 1)) throw new RangeError("--threshold must be in (0, 1]");
 
   await withCtx(argv, async ({ db, config }) => {
     // A backfill runs for minutes beside the scheduled index, whose publication chunks can hold
@@ -57,9 +60,9 @@ export async function summarizeCmd(argv: string[]): Promise<number> {
     const waitForGate = async () => {
       if (!gated) return;
       for (;;) {
-        const gate = gateDecision(readGate(layers), DEFAULT_USAGE_THRESHOLD);
+        const gate = gateDecision(readGate(layers), threshold);
         if (gate.ok) return;
-        process.stdout.write(`  usage ${gate.reason} ≥ ${Math.round(DEFAULT_USAGE_THRESHOLD * 100)}% · paused until ${new Date(gate.untilMs).toLocaleString()}\n`);
+        process.stdout.write(`  usage ${gate.reason} ≥ ${Math.round(threshold * 100)}% · paused until ${new Date(gate.untilMs).toLocaleString()}\n`);
         await sleep(Math.max(1_000, gate.untilMs - Date.now()));
       }
     };

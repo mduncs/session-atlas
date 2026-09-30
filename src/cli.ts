@@ -40,7 +40,7 @@ Keep
 Index and enrich
   atlas index [--full]        reconcile configured sources (provider-free)
   atlas note <session-id>     targeted ingest + summarize; --ingest-only is hook-safe
-  atlas summarize [--backfill|--redo|<id>] [--origin human] [--concurrency N]   tier-1 summaries + tags
+  atlas summarize [--backfill|--redo|<id>] [--origin human] [--concurrency N] [--threshold 0.95]   tier-1 summaries + tags
   atlas tags [NAME|consolidate|log] [--promote|--refresh]
   atlas classify-humans [--limit N] [--run|--all]  opt-in human/agent classifier; preview by default
   atlas layers creator|shape|all  recompute who-started / shape + episodes (provider-free)
