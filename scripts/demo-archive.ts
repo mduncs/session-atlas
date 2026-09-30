@@ -341,7 +341,7 @@ export function assertSafeOut(out: string, env: NodeJS.ProcessEnv = process.env)
 // ─── build ────────────────────────────────────────────────────────────────
 
 /** The one launcher the demo config offers; harmless by construction. */
-const DEMO_LAUNCHER = { name: "fresh-agent", cmd: "cat {payload}" };
+const DEMO_LAUNCHER = { name: "next-session", cmd: "less {payload}" };
 
 function configToml(out: string): string {
   const lines = [

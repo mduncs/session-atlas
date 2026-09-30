@@ -11,8 +11,9 @@ bun src/cli.ts --config /tmp/atlas-demo/config.toml
 
 The builder copies `demo/sources/` into `<out>/sources/`, writes
 `<out>/config.toml` with only the Claude and Codex roots enabled, both inside
-`<out>`, no provider, and one harmless launcher (`fresh-agent`, which runs
-`cat {payload}`). It then runs the real provider-free `atlas index` and
+`<out>`, no provider, and one harmless launcher (`next-session`: `less
+{payload}`, which opens on the payload's first screen). It then runs the real
+provider-free `atlas index` and
 `atlas layers all`, seeds the fixture layers and summaries (see below), and
 prints a summary followed by a privacy scan. A rebuild replaces the previous
 build, including any `exports/` the TUI wrote. It refuses an `--out` that overlaps the live Atlas
@@ -73,7 +74,7 @@ Codex):
 | Chains | `split importers by bank` plus its two spawned workers (a chain of 3) |
 | Plan handoff | `station picker redesign plan…` (`I want to redesign the station picker…`), then `station picker build…` (`Implement the following plan: …`) |
 | Decision revisited | `Luxon decision revisited…` (`remember we picked luxon for the ghost hour fix?`) |
-| Export / continue | Mark a span with `x` … `x`, favorite it with `f`, then `e`: the preview offers `fresh-agent`, and the export copies the `cat <payload>` command to the clipboard |
+| Export / continue | Mark a span with `x` … `x`, favorite it with `f`, then `e`: the preview offers `next-session`, and the export copies the `less <payload>` command to the clipboard |
 
 ## Fixture boundary
 
