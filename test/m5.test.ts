@@ -96,21 +96,21 @@ test("M5 Law 4 — completely unparseable input degrades to prose body, zero anc
   expect(result.anchors).toEqual([]);
 });
 
-test("M5 F9 — staleness: growth past threshold invalidates tier-1 + tier-2, re-queues", async () => {
+test("M5 F9 — staleness: dialogue growth past threshold flags both tiers and re-queues, keeping the prose", async () => {
   db = await openDb(dbPath);
-  // Seed a session with tier-1 summary covering 10 messages.
+  // Seed a session with tier-1 summary covering 10 dialogue turns.
   const sid = seedSession(db, "s1", 10);
 
   db.prepare(
-    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at)
-     VALUES (?, 1, 'test topic', 10, 'm', ?)`,
+    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at, coverage_basis)
+     VALUES (?, 1, 'test topic', 10, 'm', ?, 'dialogue_turn_count_v1')`,
   ).run(sid, Date.now());
   db.prepare(
     `INSERT INTO summaries(session_id, tier, body, msg_count_covered, model, generated_at)
      VALUES (?, 2, 'tier2 body', 10, 'm', ?)`,
   ).run(sid, Date.now());
 
-  // Add 15 messages → growth = 50%, past the 25% threshold.
+  // Add 15 dialogue turns: growth 150%, past the 25% threshold.
   appendDialogue(db, sid, 10, 15);
 
   const check = checkStaleness(db, sid, 25);
@@ -119,11 +119,11 @@ test("M5 F9 — staleness: growth past threshold invalidates tier-1 + tier-2, re
   expect(check.current).toBe(25);
   expect(check.growthPct).toBe(150);
 
-  // Stale → tier-1 and tier-2 summaries deleted, job enqueued.
-  const remaining = (
-    db.prepare(`SELECT COUNT(*) n FROM summaries WHERE session_id=?`).get(sid) as { n: number }
-  ).n;
-  expect(remaining).toBe(0);
+  // Stale: both tiers stay readable, flagged for revalidation; one job queued.
+  expect(db.prepare(`SELECT tier, topic_line, body, needs_revalidation FROM summaries WHERE session_id=? ORDER BY tier`).all(sid)).toEqual([
+    { tier: 1, topic_line: "test topic", body: null, needs_revalidation: 1 },
+    { tier: 2, topic_line: null, body: "tier2 body", needs_revalidation: 1 },
+  ]);
   const work = db.prepare(
     `SELECT id,kind,current_status,blocked_reason,attempt_count
      FROM job_work WHERE target_harness='claude' AND target_native_id='s1' AND kind='tier1'`,
@@ -133,6 +133,38 @@ test("M5 F9 — staleness: growth past threshold invalidates tier-1 + tier-2, re
   expect(db.prepare(`SELECT status,error FROM job_attempts WHERE work_id=?`).get(work.id)).toMatchObject({
     status: "blocked", error: expect.stringContaining("stale"),
   });
+
+  // A later reconciliation of the same flagged summary does not queue again.
+  checkStaleness(db, sid, 25);
+  expect((db.prepare(`SELECT attempt_count FROM job_work WHERE id=?`).get(work.id) as { attempt_count: number }).attempt_count).toBe(1);
+});
+
+test("M5 F9 — tool and control records never count as growth; a legacy basis is never judged", async () => {
+  db = await openDb(dbPath);
+  const sid = seedSession(db, "s-tools", 10);
+  db.prepare(
+    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at, coverage_basis)
+     VALUES (?, 1, 'tools', 10, 'm', ?, 'dialogue_turn_count_v1')`,
+  ).run(sid, Date.now());
+  const generation = (db.prepare(`SELECT construction_generation g FROM sessions WHERE id=?`).get(sid) as { g: string }).g;
+  const tool = db.prepare(
+    `INSERT INTO messages(session_id,ordinal,source_ordinal,role,ts,text,prose,event_ts,has_tool,tok_estimate,
+       record_kind,dialogue_side,source_record_id,source_record_ts,source_identity_kind,construction_generation)
+     VALUES (?,?,?,'tool',?,'',NULL,?,1,1,'tool',NULL,?,?,'record-id',?)`,
+  );
+  for (let ordinal = 10; ordinal < 40; ordinal++) tool.run(sid, ordinal, ordinal, ordinal, ordinal, `tool-${ordinal}`, ordinal, generation);
+  rebuildLogicalMetrics(db, sid, generation);
+
+  expect(checkStaleness(db, sid, 25)).toMatchObject({ stale: false, covered: 10, current: 10 });
+  expect(db.prepare(`SELECT needs_revalidation FROM summaries WHERE session_id=?`).get(sid)).toEqual({ needs_revalidation: 0 });
+
+  const legacy = seedSession(db, "s-legacy", 10);
+  db.prepare(
+    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at)
+     VALUES (?, 1, 'legacy', 2, 'm', ?)`,
+  ).run(legacy, Date.now());
+  expect(checkStaleness(db, legacy, 25).stale).toBe(false);
+  expect(db.prepare(`SELECT COUNT(*) n FROM summaries WHERE session_id=? AND needs_revalidation=0`).get(legacy)).toEqual({ n: 1 });
 });
 
 test("M5 F9 — under-threshold growth does NOT invalidate", async () => {
@@ -140,8 +172,8 @@ test("M5 F9 — under-threshold growth does NOT invalidate", async () => {
   const sid = seedSession(db, "s1", 10);
 
   db.prepare(
-    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at)
-     VALUES (?, 1, 'test', 10, 'm', ?)`,
+    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at, coverage_basis)
+     VALUES (?, 1, 'test', 10, 'm', ?, 'dialogue_turn_count_v1')`,
   ).run(sid, Date.now());
 
   // Growth of 20% (12 msgs from 10) — under 25% threshold.

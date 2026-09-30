@@ -322,12 +322,20 @@ export function readDashboardAnalytics(
   const completedLastHour = Number(summarizerRow?.completed ?? 0);
   const failures = Number(summarizerRow?.failures ?? 0);
 
+  // Only roots the latest finished reconciliation still walks can be in error; a root dropped
+  // from the config (or a disabled source) keeps its last failed run forever otherwise.
   const latestIngestErrors = count(
     db,
-    `SELECT COUNT(*) n FROM ingest_runs r
+    `WITH plan AS (
+       SELECT rs.source, rr.root FROM reconciliation_roots rr
+       JOIN reconciliation_sources rs ON rs.id=rr.reconciliation_source_id
+       WHERE rs.group_id=(SELECT MAX(id) FROM reconciliation_groups WHERE finished_at IS NOT NULL)
+     )
+     SELECT COUNT(*) n FROM ingest_runs r
      JOIN (SELECT source, root, MAX(id) id FROM ingest_runs GROUP BY source, root) latest
        ON latest.id=r.id
-     WHERE r.error IS NOT NULL`,
+     WHERE r.error IS NOT NULL
+       AND (NOT EXISTS (SELECT 1 FROM plan) OR EXISTS (SELECT 1 FROM plan p WHERE p.source=r.source AND p.root=r.root))`,
   );
   const errorCount = failures + latestIngestErrors;
 

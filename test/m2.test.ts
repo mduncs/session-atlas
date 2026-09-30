@@ -161,3 +161,21 @@ test("Law 3 — buildProseTurns strips tool noise (prose view only)", async () =
   expect(turns.length).toBe(2);
   expect(turns.every((t) => t.role !== "tool")).toBe(true);
 });
+
+test("a tier-1 summary flagged stale is summarized again; an unflagged one is skipped", async () => {
+  db = await openDb(dbPath);
+  const sid = seedSession(db, "Tracing why archived summaries vanished after a reparse.");
+  db.prepare(
+    `INSERT INTO summaries(session_id, tier, topic_line, msg_count_covered, model, generated_at, coverage_basis)
+     VALUES (?, 1, 'summary vanish trace', 1, 'm', ?, 'dialogue_turn_count_v1')`,
+  ).run(sid, Date.now());
+  const config = baseConfig(dbPath);
+  expect(await summarizeSession(db, config, sid)).toMatchObject({ status: "skipped", reason: "already summarized" });
+
+  db.prepare(`UPDATE summaries SET needs_revalidation=1 WHERE session_id=?`).run(sid);
+  const retried = await summarizeSession(db, config, sid);
+  expect(retried).not.toMatchObject({ reason: "already summarized" });
+  // No provider here, so the stale prose stays readable until a real replacement lands.
+  expect(db.prepare(`SELECT topic_line, needs_revalidation FROM summaries WHERE session_id=? AND tier=1`).get(sid))
+    .toEqual({ topic_line: "summary vanish trace", needs_revalidation: 1 });
+});

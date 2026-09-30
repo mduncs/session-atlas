@@ -7,7 +7,7 @@
  * anchors degrade to an unanchored summary + logged retry (Law 4).
  *
  * Staleness: every summary records msg_count_covered. A session that grew past
- * it by summary_stale_pct re-queues tier-1 and invalidates tier-2.
+ * it by summary_stale_pct re-queues tier-1 and flags both tiers for revalidation.
  */
 import type { DB } from "./db/index.js";
 import { bumpLastWrite } from "./db/index.js";
@@ -69,8 +69,8 @@ export async function summarizeTier2(
 ): Promise<Tier2Outcome> {
   // Check for cached tier-2.
   const cached = db
-    .prepare(`SELECT id, body, model FROM summaries WHERE session_id=? AND tier=2`)
-    .get(sessionId) as { id: number; body: string; model: string } | undefined;
+    .prepare(`SELECT id, body, model, needs_revalidation FROM summaries WHERE session_id=? AND tier=2`)
+    .get(sessionId) as { id: number; body: string; model: string; needs_revalidation: number } | undefined;
   let degradedCache: { result: Tier2Result; model: string } | null = null;
   if (cached) {
     const anchors = loadAnchors(db, cached.id);
@@ -81,7 +81,7 @@ export async function summarizeTier2(
         )
         .get(sessionId),
     );
-    if (anchors.length > 0 && !retryPending) {
+    if (anchors.length > 0 && !retryPending && cached.needs_revalidation === 0) {
       return { status: "cached", result: { body: cached.body, anchors }, model: cached.model };
     }
     // Preserve the usable prose as a fallback, but continue into a retry.  An
@@ -163,9 +163,11 @@ export async function summarizeTier2(
   const parsedOutput = parseTier2Detailed(status.text);
   const parsed = parsedOutput.result;
   if (cancelled(options)) return { status: "skipped", reason: "cancelled" };
-  const msgCount = (
-    db.prepare(`SELECT COUNT(*) n FROM messages WHERE session_id=?`).get(sessionId) as { n: number }
-  ).n;
+  // Same unit as tier-1 coverage (dialogue_turn_count_v1), so staleness compares like with like.
+  const msgCount = Number(
+    (db.prepare(`SELECT dialogue_turn_count n FROM construction_metrics WHERE session_id=?`).get(sessionId) as
+      { n: number | null } | null)?.n ?? 0,
+  );
 
   persistTier2Result(db, {
     sessionId,
@@ -204,7 +206,7 @@ export function persistTier2Result(db: DB, input: PersistTier2Input): number {
        VALUES (?, 2, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id, tier) DO UPDATE SET
          body=excluded.body, msg_count_covered=excluded.msg_count_covered,
-         model=excluded.model, generated_at=excluded.generated_at`,
+         model=excluded.model, generated_at=excluded.generated_at, needs_revalidation=0`,
     ).run(
       input.sessionId,
       input.topicLine,
@@ -335,18 +337,22 @@ export interface StalenessCheck {
 }
 
 /**
- * Check if a session's tier-1 summary is stale: grew past the covered message
- * count by summary_stale_pct. If stale, re-queue tier-1 and invalidate tier-2.
+ * Check if a session's tier-1 summary is stale: grew past the covered
+ * dialogue-turn count by summary_stale_pct. Coverage and growth use one unit
+ * (the summary's coverage_basis); a legacy basis has no comparable current
+ * count and is never judged. A stale summary is flagged and re-queued, never
+ * deleted: the prose stays readable until a provider replaces it.
  */
 export function checkStaleness(db: DB, sessionId: number, stalePct: number): StalenessCheck {
   const t1 = db
-    .prepare(`SELECT msg_count_covered FROM summaries WHERE session_id=? AND tier=1`)
-    .get(sessionId) as { msg_count_covered: number } | undefined;
-  const current = (
-    db.prepare(`SELECT COUNT(*) n FROM messages WHERE session_id=?`).get(sessionId) as { n: number }
-  ).n;
+    .prepare(`SELECT msg_count_covered, coverage_basis, needs_revalidation FROM summaries WHERE session_id=? AND tier=1`)
+    .get(sessionId) as { msg_count_covered: number; coverage_basis: string; needs_revalidation: number } | undefined;
+  const metrics = db
+    .prepare(`SELECT dialogue_turn_count n FROM construction_metrics WHERE session_id=?`)
+    .get(sessionId) as { n: number | null } | null;
+  const current = Number(metrics?.n ?? 0);
 
-  if (!t1) return { stale: false, covered: 0, current, growthPct: 0 };
+  if (!t1 || t1.coverage_basis !== "dialogue_turn_count_v1") return { stale: false, covered: t1?.msg_count_covered ?? 0, current, growthPct: 0 };
   const covered = t1.msg_count_covered;
   if (covered === 0 || current <= covered) {
     return { stale: false, covered, current, growthPct: 0 };
@@ -354,11 +360,9 @@ export function checkStaleness(db: DB, sessionId: number, stalePct: number): Sta
   const growthPct = ((current - covered) / covered) * 100;
   const stale = growthPct >= stalePct;
 
-  if (stale) {
-    // Invalidate: delete tier-1 + tier-2, enqueue tier-1 for re-summarize.
+  if (stale && t1.needs_revalidation === 0) {
     const tx = db.transaction(() => {
-      db.prepare(`DELETE FROM summaries WHERE session_id=?`).run(sessionId);
-      // summary_anchors cascade-deleted with tier-2 summary row.
+      db.prepare(`UPDATE summaries SET needs_revalidation=1 WHERE session_id=?`).run(sessionId);
       enqueueJob(db, sessionId, "tier1", `stale: grew ${growthPct.toFixed(0)}% past covered`);
       bumpLastWrite(db);
     });

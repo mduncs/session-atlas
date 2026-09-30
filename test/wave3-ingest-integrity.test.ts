@@ -288,7 +288,7 @@ test("Kilo freshness catches same-length WAL-visible in-place content updates", 
   source.close();
 });
 
-test("production ingest invalidates stale summaries and requeues tier-1", async () => {
+test("production ingest flags stale summaries for revalidation, keeps them, and requeues tier-1", async () => {
   const root = join(dir, "claude");
   const first = [0, 1, 2, 3].map((i) => claudeLine(`turn ${i}`, i));
   const path = claudeFile(root, first);
@@ -296,13 +296,18 @@ test("production ingest invalidates stale summaries and requeues tier-1", async 
   const cfg = config({ claude: { roots: [root] } });
   await ingest(db, cfg);
   const sid = (db.prepare(`SELECT id FROM sessions`).get() as { id: number }).id;
-  db.prepare(`INSERT INTO summaries(session_id,tier,topic_line,msg_count_covered,model,generated_at) VALUES (?,1,'topic',4,'m',1)`).run(sid);
-  db.prepare(`INSERT INTO summaries(session_id,tier,body,msg_count_covered,model,generated_at) VALUES (?,2,'body',4,'m',1)`).run(sid);
+  const turns = (db.prepare(`SELECT dialogue_turn_count n FROM construction_metrics WHERE session_id=?`).get(sid) as { n: number }).n;
+  expect(turns).toBe(4);
+  db.prepare(`INSERT INTO summaries(session_id,tier,topic_line,msg_count_covered,model,generated_at,coverage_basis) VALUES (?,1,'topic',?,'m',1,'dialogue_turn_count_v1')`).run(sid, turns);
+  db.prepare(`INSERT INTO summaries(session_id,tier,body,msg_count_covered,model,generated_at) VALUES (?,2,'body',?,'m',1)`).run(sid, turns);
 
   writeFileSync(path, [...first, claudeLine("growth", 4)].join("\n") + "\n");
   forceMtime(path, 1);
   await ingest(db, cfg);
-  expect((db.prepare(`SELECT COUNT(*) n FROM summaries WHERE session_id=?`).get(sid) as { n: number }).n).toBe(0);
+  expect(db.prepare(`SELECT tier,needs_revalidation FROM summaries WHERE session_id=? ORDER BY tier`).all(sid)).toEqual([
+    { tier: 1, needs_revalidation: 1 },
+    { tier: 2, needs_revalidation: 1 },
+  ]);
   const work = db.prepare(
     `SELECT id,kind,current_status,blocked_reason,attempt_count
      FROM job_work WHERE target_harness='claude' AND target_native_id=? AND kind='tier1'`,

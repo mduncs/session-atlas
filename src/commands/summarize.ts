@@ -123,14 +123,14 @@ function collectBackfillIds(
         .all(...params, opts.limit) as { id: number }[]
     ).map((r) => r.id);
   }
-  // Newest-first unsummarized.
+  // Newest-first unsummarized, plus summaries flagged stale (kept readable until replaced).
   return (
     db
       .prepare(
         `SELECT s.id FROM sessions s
          JOIN construction_metrics cm ON cm.session_id=s.id AND cm.construction_generation=s.construction_generation
          LEFT JOIN summaries sm ON sm.session_id=s.id AND sm.tier=1
-         WHERE sm.id IS NULL AND s.construction_status='valid' AND cm.dialogue_turn_count > 0
+         WHERE (sm.id IS NULL OR sm.needs_revalidation=1) AND s.construction_status='valid' AND cm.dialogue_turn_count > 0
          ORDER BY s.last_activity DESC LIMIT ?`,
       )
       .all(opts.limit) as { id: number }[]

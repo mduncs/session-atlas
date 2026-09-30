@@ -116,6 +116,28 @@ test("ingest rate shows only while a run is open; an interrupted run older than 
   }
 });
 
+test("a root the latest reconciliation no longer walks stops counting as an error", () => {
+  const db = fixture();
+  try {
+    expect(readDashboardAnalytics(db, {}, NOW).errorCount).toBe(2);
+    const group = Number((db.prepare(
+      `INSERT INTO reconciliation_groups(config_digest,trigger_kind,started_at,finished_at,status,enabled_source_count,complete_source_count)
+       VALUES ('d','scheduled',?,?,'complete',1,1)`,
+    ).run(NOW - 10_000, NOW - 5_000) as { lastInsertRowid: number | bigint }).lastInsertRowid);
+    const source = Number((db.prepare(
+      `INSERT INTO reconciliation_sources(group_id,source,resolution_mode,resolved_roots_json,status)
+       VALUES (?,'claude','builtin','["/src"]','complete')`,
+    ).run(group) as { lastInsertRowid: number | bigint }).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO reconciliation_roots(reconciliation_source_id,root_ordinal,root,reachability) VALUES (?,0,'/src','reachable')`,
+    ).run(source);
+    // codex:/src failed last, but the current plan only walks claude:/src.
+    expect(readDashboardAnalytics(db, {}, NOW).errorCount).toBe(1);
+  } finally {
+    db.close();
+  }
+});
+
 test("row state lookup is bounded to viewport identities", () => {
   const db = fixture();
   try {

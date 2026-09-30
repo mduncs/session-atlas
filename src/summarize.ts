@@ -106,11 +106,13 @@ export async function summarizeSession(
   sessionId: number,
   opts: SummarizeOptions = {},
 ): Promise<SummarizeOutcome> {
-  // Already summarized this prompt version? skip (staleness handled elsewhere).
+  // Already summarized and not flagged stale by checkStaleness? skip.
   const existing = db
-    .prepare(`SELECT id FROM summaries WHERE session_id=? AND tier=1`)
-    .get(sessionId) as { id: number } | null;
-  if (existing && !opts.redo) return { sessionId, status: "skipped", reason: "already summarized" };
+    .prepare(`SELECT id, needs_revalidation FROM summaries WHERE session_id=? AND tier=1`)
+    .get(sessionId) as { id: number; needs_revalidation: number } | null;
+  if (existing && existing.needs_revalidation === 0 && !opts.redo) {
+    return { sessionId, status: "skipped", reason: "already summarized" };
+  }
 
   if (opts.signal?.aborted || (opts.shouldCommit && !opts.shouldCommit())) {
     return { sessionId, status: "skipped", reason: "cancelled" };
