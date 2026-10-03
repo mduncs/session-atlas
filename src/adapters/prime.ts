@@ -31,7 +31,7 @@ interface PrimeHeader {
 export const primeAdapter: Adapter = {
   source: "prime",
   continuitySupport: "supported",
-  sidecarVersion: `${PRIME_CLASSIFICATION_VERSION}:${PRIME_REPLAY_VERSION}:${PRIME_TITLE_VERSION}:compact-v1`,
+  sidecarVersion: `${PRIME_CLASSIFICATION_VERSION}:${PRIME_REPLAY_VERSION}:${PRIME_TITLE_VERSION}:compact-v1:root-fork-v1`,
   sidecarContextFingerprint(src) {
     const header = readSessionHeader(src.fullPath);
     if (!header?.parentSession) return header;
@@ -72,7 +72,9 @@ export const primeAdapter: Adapter = {
     const header = readSessionHeader(src.fullPath);
     if (!header) return reject(src, "no_session_envelope", "missing complete supported Prime session header");
     if (layout === "root") {
-      if (header.depth > 0 || header.parentSession) {
+      // A root session may name the session it was forked from; only a
+      // positive rlmDepth marks an RLM child, and those belong in the child layout.
+      if (header.depth > 0) {
         return reject(src, "unsupported_unit_shape", "RLM child envelope outside the official child layout");
       }
     } else {
@@ -123,7 +125,8 @@ function parsePrime(src: DiscoveredSource, layout: PrimeLayout, admittedHeader: 
       cwd = stringValue(rec.cwd) ?? cwd;
       depth = numberValue(rec.rlmDepth) ?? 0;
       const parentPath = stringValue(rec.parentSession);
-      if (parentPath) parentNativeId = readSessionHeader(resolveParentPath(src.fullPath, parentPath))?.id ?? null;
+      // Only an official RLM child resolves a parent edge; a root fork stays top-level.
+      if (parentPath && layout === "child") parentNativeId = readSessionHeader(resolveParentPath(src.fullPath, parentPath))?.id ?? null;
       return;
     }
     if (type === "session_info") {
@@ -242,7 +245,7 @@ function parsePrime(src: DiscoveredSource, layout: PrimeLayout, admittedHeader: 
       transcriptBytes: semanticProjectionBytes(messages),
       parentNativeId,
       origin: layout === "child" ? "agent" : "human",
-      originDetail: layout === "child" ? `prime:rlm-child:depth-${depth}` : "prime:root-session",
+      originDetail: layout === "child" ? `prime:rlm-child:depth-${depth}` : admittedHeader.parentSession ? "prime:root-fork" : "prime:root-session",
       continuityEvents,
       continuitySupport: "supported",
       construction,

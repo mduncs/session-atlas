@@ -59,6 +59,23 @@ const inner = (role: string, id: string, timestamp: number | undefined, content:
   expect(childRecord).toMatchObject({ parentNativeId: "fixture-parent", origin: "agent", originDetail: "prime:rlm-child:depth-1" });
  });
 
+// F22b
+ test("F22b Prime admits a root fork as its own top-level session without a parent edge", () => {
+  const root = fixtureRoot("f22b");
+  const parent = primeRoot(root, "fixture-origin", [header("fixture-origin")]);
+  primeRoot(root, "fixture-fork-name", [
+    { type: "session", version: 3, id: "fixture-fork", rlmDepth: 0, parentSession: parent },
+    inner("user", "fixture-u", 211, [{ type: "text", text: "fixture forked request" }]),
+  ]);
+  primeRoot(root, "fixture-stray-child", [{ type: "session", version: 3, id: "fixture-stray", rlmDepth: 1, parentSession: parent }]);
+  const discovered = primeAdapter.discover([root]);
+  const fork = primeAdapter.admit!(discovered.find((row) => row.nativeId === "fixture-fork")!);
+  expect(fork.admitted).toBe(true);
+  if (fork.admitted) expect(fork.record).toMatchObject({ nativeId: "fixture-fork", parentNativeId: null, origin: "human", originDetail: "prime:root-fork" });
+  const stray = primeAdapter.admit!(discovered.find((row) => row.nativeId === "fixture-stray")!);
+  expect(stray.admitted ? null : stray.reason).toBe("unsupported_unit_shape");
+ });
+
 // F23
  test("F23 Prime rejects tmux and noncanonical external supervision artifacts", () => {
   const root = fixtureRoot("f23");
