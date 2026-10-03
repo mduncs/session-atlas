@@ -130,6 +130,8 @@ atlas                         interactive TUI
 atlas index [--full]          cache-aware complete source reconciliation
 atlas search "query"          full-text search
 atlas read <id> --mode stubs  print a session
+atlas lineage [path]          a project's sessions across moves, renames, worktrees
+atlas lineage --messages --from D --to D   that era's human messages verbatim
 atlas summarize --backfill    resumable tier-1 summary backfill
 atlas fav <id> [topic]        materialize the live tail as a favorite
 atlas fav <id> --from 4 --to 9

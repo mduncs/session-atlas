@@ -6,7 +6,8 @@ import { doctorCmd } from "./commands/doctor.js";
 import { exportCmd } from "./commands/export.js";
 import { favCmd } from "./commands/fav.js";
 import { indexCmd } from "./commands/index.js";
-import { lsCmd } from "./commands/ls.js";
+import { LINEAGE_HELP, lineageCmd } from "./commands/lineage.js";
+import { LS_HELP, lsCmd } from "./commands/ls.js";
 import { migrateCmd } from "./commands/migrate.js";
 import { noteCmd } from "./commands/note.js";
 import { readCmd } from "./commands/read.js";
@@ -29,6 +30,7 @@ Browse
   atlas ls [filters]          list sessions; --source/model/path/tag/origin/favorite/state/chain/from/to
   atlas search <q> [filters]  literal search composed with list filters; --raw enables FTS5 syntax
   atlas read <id>             read a transcript
+  atlas lineage [path]        one project's history across moves/renames/worktrees; --messages for human turns
   atlas chat "<question>"     grounded, cited archive Q&A (needs a provider)
 
 Keep
@@ -63,6 +65,9 @@ All commands accept --config <path>. The configured dbPath is authoritative.
 Preview-by-default commands change nothing until --yes / --run.
 `;
 
+/** Verbs with their own usage text; the rest fall back to HELP. */
+const VERB_HELP = new Map<string, string>([["ls", LS_HELP], ["lineage", LINEAGE_HELP]]);
+
 /** Dispatch a command-vector without process.exit, so routing is integration-testable. */
 export interface CliOverrides {
   tui?: typeof tuiCmd;
@@ -82,7 +87,7 @@ export async function dispatchCli(args: string[], overrides: CliOverrides = {}):
   // Help is always side-effect-free. Never let a verb-local help flag fall
   // through to indexing, rebuilding, provider calls, or another operation.
   if (rest.includes("--help") || rest.includes("-h")) {
-    process.stdout.write(HELP);
+    process.stdout.write((cmd && VERB_HELP.get(cmd)) || HELP);
     return 0;
   }
   switch (cmd) {
@@ -113,6 +118,7 @@ export async function dispatchCli(args: string[], overrides: CliOverrides = {}):
     case "searches": return searchesCmd(rest);
     case "search": return searchCmd(rest);
     case "read": return readCmd(rest);
+    case "lineage": return lineageCmd(rest);
     case "chat": return chatCmd(rest);
     case "help":
     case "--help":
