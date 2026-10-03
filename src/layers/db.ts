@@ -9,9 +9,10 @@
  * rows here that are not recomputable, so rebuild passes never touch them.
  */
 import { Database } from "bun:sqlite";
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { threadId } from "node:worker_threads";
 import type { DB } from "../db/index.js";
 
 export const LAYERS_SCHEMA_VERSION = 4;
@@ -263,10 +264,35 @@ export function attachLayers(db: DB, dbPath: string | null, options: { create?: 
       return "file";
     }
   }
-  const empty = join(tmpdir(), `atlas-empty-layers-${LAYERS_SCHEMA_VERSION}-${process.pid}.layers.db`);
-  if (!existsSync(empty)) openLayersDb(empty.replace(/\.layers\.db$/, ".db")).close();
-  db.query("ATTACH DATABASE ? AS layers").run(empty);
+  db.query("ATTACH DATABASE ? AS layers").run(emptyLayer());
   return "empty";
+}
+
+let emptyLayerPath: string | null = null;
+
+/**
+ * One scratch layer per thread, removed on exit. Killed processes and runners
+ * that skip exit handlers (bun test) leave theirs behind, so the first use
+ * sweeps any whose process is gone.
+ */
+function emptyLayer(): string {
+  if (!emptyLayerPath) {
+    for (const name of readdirSync(tmpdir())) {
+      const owner = /^atlas-empty-layers-\d+-(\d+)(?:-\d+)?\.layers\.db(?:-wal|-shm)?$/.exec(name);
+      if (owner && Number(owner[1]) !== process.pid && !processAlive(Number(owner[1]))) rmSync(join(tmpdir(), name), { force: true });
+    }
+    const path = join(tmpdir(), `atlas-empty-layers-${LAYERS_SCHEMA_VERSION}-${process.pid}-${threadId}.layers.db`);
+    const remove = () => { for (const suffix of ["", "-wal", "-shm"]) rmSync(path + suffix, { force: true }); };
+    remove(); // a dead process that had this pid; sibling threads keep theirs
+    process.once("exit", remove);
+    emptyLayerPath = path;
+  }
+  if (!existsSync(emptyLayerPath)) openLayersDb(emptyLayerPath.replace(/\.layers\.db$/, ".db")).close();
+  return emptyLayerPath;
+}
+
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
 function isAttached(db: DB): boolean {

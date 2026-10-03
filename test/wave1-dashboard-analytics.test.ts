@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { runMigrations } from "../src/db/index.js";
 import { attachLayers } from "../src/layers/db.js";
 import {
@@ -11,13 +11,17 @@ import {
 } from "../src/tui/analytics.js";
 
 const NOW = 1_800_000_000_000;
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function fixture(): Database {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   runMigrations(db);
   // A private layers file: the creator lens reads who started each session.
-  attachLayers(db, join(mkdtempSync(join(tmpdir(), "atlas-analytics-")), "atlas.db"));
+  const root = mkdtempSync(join(tmpdir(), "atlas-analytics-"));
+  roots.push(root);
+  attachLayers(db, join(root, "atlas.db"));
   const insert = db.prepare(
     `INSERT INTO sessions(
       harness,native_id,source_path,title,last_activity,duration_ms,models,

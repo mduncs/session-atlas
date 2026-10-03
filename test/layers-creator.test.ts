@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyUserText, decideCreator, setLearnedVocabulary, typoCount, voiceOf, type CreatorInput } from "../src/layers/authorship.js";
-import { attachLayers, layersPathFor, openLayersDb } from "../src/layers/db.js";
+import { attachLayers, LAYERS_SCHEMA_VERSION, layersPathFor, openLayersDb } from "../src/layers/db.js";
 import { correctCreator, readCreator, toggleCreator } from "../src/layers/corrections.js";
 import { creatorFilterSql } from "../src/layers/creator-sql.js";
 
@@ -132,6 +132,27 @@ describe("layers database", () => {
       attachLayers(ro, path);
       expect(ro.query("SELECT count(*) AS n FROM layers.session_creator").get()).toEqual({ n: 0 });
       ro.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("a scratch layer goes with its process and sweeps dead processes' leftovers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atlas-layers-scratch-"));
+    try {
+      const scratch = (pid: number) => ["", "-wal", "-shm"].map((suffix) => `atlas-empty-layers-${LAYERS_SCHEMA_VERSION}-${pid}-0.layers.db${suffix}`);
+      const dead = Bun.spawnSync([process.execPath, "-e", ""]).pid;
+      for (const name of [...scratch(dead), ...scratch(process.pid)]) writeFileSync(join(dir, name), "");
+      const child = Bun.spawnSync([process.execPath, "-e", `
+        import { Database } from "bun:sqlite";
+        import { existsSync } from "node:fs";
+        import { join } from "node:path";
+        import { attachLayers } from ${JSON.stringify(join(import.meta.dir, "..", "src", "layers", "db.ts"))};
+        const db = new Database(":memory:");
+        const mode = attachLayers(db, null);
+        db.query("SELECT count(*) FROM layers.session_creator").get();
+        console.log(mode, existsSync(join(process.env.TMPDIR, ${JSON.stringify(scratch(0)[0])}.replace("-0-0.", "-" + process.pid + "-0."))));
+      `], { env: { ...process.env, TMPDIR: dir } });
+      expect(child.stdout.toString().trim()).toBe("empty true");
+      expect(readdirSync(dir).sort()).toEqual(scratch(process.pid).sort());
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
