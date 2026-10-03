@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,6 +16,7 @@ import { DEFAULT_TUNABLES, type Config } from "../src/config.js";
 import { openDb, type DB } from "../src/db/index.js";
 import { TITLE_DISPLAY_MAX, displayTitle, ingest } from "../src/ingest.js";
 import { repairSessionTitles } from "../src/title-repair.js";
+import { walkChurnOnly } from "../src/commands/index.js";
 import {
   loadPreparedConstruction,
   resolveIngestSidecar,
@@ -579,4 +581,37 @@ test("the session title is a capped one-line projection of the full selected evi
   expect(repairSessionTitles(db, { confirmed: true })).toMatchObject({ stale: 1, repaired: 1 });
   expect((db.prepare(`SELECT title FROM sessions WHERE id=?`).get(session.id) as { title: string }).title).toBe(session.title);
   expect(repairSessionTitles(db, { confirmed: true })).toMatchObject({ stale: 0, repaired: 0 });
+});
+
+test("a transcript still being written is walk churn, not a unit error", async () => {
+  const f = fixture("live");
+  const harness = makeFixture(f.sourceRoot, [
+    { nativeId: "settled-1", relPath: "settled.txt", initial: "settled\n" },
+    { nativeId: "live-1", relPath: "live.txt", initial: "live\n" },
+  ], (source, raw) => recordFor(source, raw));
+  let writes = 1;
+  const parse = harness.adapter.parse;
+  harness.adapter.parse = (source) => {
+    const result = parse(source);
+    if (source.nativeId === "live-1" && writes-- > 0) appendFileSync(source.fullPath, "more\n");
+    return result;
+  };
+  db = await openDb(f.dbPath);
+  const options = { adapters: { fixture: harness.adapter }, sidecarDir: f.sidecarDir };
+
+  // One write lands mid-capture; the retry captures the grown transcript.
+  const retried = (await ingest(db, config(f.sourceRoot, f.dbPath), options))[0]!;
+  expect(retried).toMatchObject({ inserted: 2 });
+  expect(retried.roots[0]).toMatchObject({ unitErrors: 0, changedDuringWalk: true, error: undefined });
+  expect(walkChurnOnly(retried)).toBe(true);
+  expect(db.prepare(`SELECT transcript_bytes FROM sessions WHERE native_id='live-1'`).get()).toEqual({ transcript_bytes: 10 });
+
+  // Writes during every capture: the unit waits for the next pass, and nothing is orphaned.
+  appendFileSync(harness.paths[1]!, "again\n");
+  writes = Infinity;
+  const live = (await ingest(db, config(f.sourceRoot, f.dbPath), options))[0]!;
+  expect(live.roots[0]).toMatchObject({ unitErrors: 0, changedDuringWalk: true, error: undefined });
+  expect(walkChurnOnly(live)).toBe(true);
+  expect(live).toMatchObject({ orphans: 0, sourceParses: 2 });
+  expect(db.prepare(`SELECT orphaned FROM sessions WHERE native_id='live-1'`).get()).toEqual({ orphaned: 0 });
 });

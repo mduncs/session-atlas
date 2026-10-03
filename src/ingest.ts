@@ -26,6 +26,7 @@ import {
   InvalidIngestSidecarError,
   loadPreparedConstruction,
   resolveIngestSidecar,
+  SourceChangedDuringSidecarCaptureError,
   type AdmittedSidecarSummary,
   type PreparedConstruction,
   type ResolvedSidecar,
@@ -42,7 +43,7 @@ export interface IngestSummary { source:string; mode:SourceConfig["mode"]; disab
 export interface IngestProgress {source:string;processed:number;total:number;}
 export interface IngestOptions { full?:boolean;onlySource?:string;adapters?:Record<string,Adapter>;onSourceComplete?:(summary:IngestSummary)=>void;onProgress?:(progress:IngestProgress)=>void;trigger?:ReconciliationTrigger;configPath?:string;faultAfterRaw?:()=>void;sidecarDir?:string;publicationChunkSize?:number;faultAfterPublicationChunk?:(completedChunks:number)=>void;storageProbe?:VolumeIdentityProbe; }
 interface Candidate {src:DiscoveredSource;rootOrdinal:number;nativeId:string;semanticBytes:number;consumed:number;freshness:{mtime:number;size:number};generation:string;record:IngestRecord|null;sidecar:ResolvedSidecar|null;prepared:PreparedConstruction|null;}
-interface RootWork {root:string;ordinal:number;rowId:number;legacyRunId:number;reachable:boolean;complete:boolean;startToken:string|null;walkStartToken:string|null;endToken:string|null;changed:boolean|null;physical:number;canonical:number;bytes:number;errors:string[];unitErrors:number;observedSources:DiscoveredSource[];rejections:Array<{src:DiscoveredSource;reason:RejectionReasonCode;detail:string|null}>;candidates:Candidate[];sidecarHits:number;sidecarMisses:number;sourceParses:number;}
+interface RootWork {root:string;ordinal:number;rowId:number;legacyRunId:number;reachable:boolean;complete:boolean;startToken:string|null;walkStartToken:string|null;endToken:string|null;changed:boolean|null;physical:number;canonical:number;bytes:number;errors:string[];unitErrors:number;observedSources:DiscoveredSource[];rejections:Array<{src:DiscoveredSource;reason:RejectionReasonCode;detail:string|null}>;candidates:Candidate[];sidecarHits:number;sidecarMisses:number;sourceParses:number;liveUnits:number;}
 
 export async function ingest(db:DB,config:Config,opts:IngestOptions={}):Promise<IngestSummary[]>{
   const started=Date.now(),digest=sourcePlanDigest(config),trigger=opts.trigger??"manual";
@@ -95,7 +96,7 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
     const startToken=identityError===null?computeRootChangeToken(root):null;
     const rootId=Number((db.prepare(`INSERT INTO reconciliation_roots(reconciliation_source_id,root_ordinal,root,reachability,started_at,start_change_token) VALUES (?,?,?,'unreachable',?,?)`).run(reconciliationSourceId,ordinal,root,Date.now(),startToken) as {lastInsertRowid:number|bigint}).lastInsertRowid);
     const legacy=Number((db.prepare(`INSERT INTO ingest_runs(source,root,started_at,reachable) VALUES (?,?,?,0)`).run(adapter.source,root,Date.now()) as {lastInsertRowid:number|bigint}).lastInsertRowid);
-    const work:RootWork={root,ordinal,rowId:rootId,legacyRunId:legacy,reachable:false,complete:false,startToken,walkStartToken:startToken,endToken:null,changed:null,physical:0,canonical:0,bytes:0,errors:[],unitErrors:0,observedSources:[],rejections:[],candidates:[],sidecarHits:0,sidecarMisses:0,sourceParses:0};roots.push(work);
+    const work:RootWork={root,ordinal,rowId:rootId,legacyRunId:legacy,reachable:false,complete:false,startToken,walkStartToken:startToken,endToken:null,changed:null,physical:0,canonical:0,bytes:0,errors:[],unitErrors:0,observedSources:[],rejections:[],candidates:[],sidecarHits:0,sidecarMisses:0,sourceParses:0,liveUnits:0};roots.push(work);
     try{
       if(identityError!==null)throw new Error(identityError);
       if(startToken===null)throw new Error("source root is unreachable");
@@ -112,13 +113,17 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
         const withOrdinal={...src,rootOrdinal:work.ordinal};
         try{
           if(adapter.sidecarVersion){
-            const resolved=resolveIngestSidecar({
+            const capture=()=>resolveIngestSidecar({
               root:sidecarDir,
               adapter,
               source:withOrdinal,
               parse:()=>{work.sourceParses++;return parseAdmission(adapter,withOrdinal);},
               validate:record=>{validateIdentity(record,adapter.source);validateDraft(record,adapter.source);},
             });
+            // A transcript still being written can grow mid-capture; one retry
+            // usually lands between writes.
+            let resolved:ResolvedSidecar;
+            try{resolved=capture();}catch(error){if(!(error instanceof SourceChangedDuringSidecarCaptureError))throw error;resolved=capture();}
             if(resolved.cache==="hit")work.sidecarHits++;else work.sidecarMisses++;
             // A miss is durable on disk now; publication reloads it like a hit, so a
             // source-wide miss never holds every parsed transcript at once.
@@ -143,11 +148,14 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
           }
         }catch(error){
           if(error instanceof MalformedJsonlLineError){work.rejections.push({src:withOrdinal,reason:"malformed_complete_record",detail:error.message});work.unitErrors++;work.errors.push(`${src.relPath}: ${error.message}`);}
+          // Still moving after the retry: this root changed during the walk. The
+          // unit waits for the next pass and orphan marking waits with it.
+          else if(error instanceof SourceChangedDuringSidecarCaptureError)work.liveUnits++;
           else{work.unitErrors++;work.errors.push(`${src.relPath}: ${errorMessage(error)}`);}
         }
       }
     }
-    const walkEndToken=work.startToken===null?null:computeRootChangeToken(work.root,work.observedSources);work.endToken=work.startToken===null?null:computeRootChangeToken(work.root);work.changed=work.walkStartToken!==null&&walkEndToken!==null?work.walkStartToken!==walkEndToken:null;
+    const walkEndToken=work.startToken===null?null:computeRootChangeToken(work.root,work.observedSources);work.endToken=work.startToken===null?null:computeRootChangeToken(work.root);work.changed=work.walkStartToken!==null&&walkEndToken!==null?work.walkStartToken!==walkEndToken||work.liveUnits>0:null;
     work.complete=work.reachable&&work.changed===false&&work.unitErrors===0;
   }
 
