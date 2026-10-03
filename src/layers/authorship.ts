@@ -85,7 +85,10 @@ export function setLearnedVocabulary(words: ReadonlySet<string>): void { learned
 /** Collect lowercase words that recur in assistant prose. */
 export function learnVocabulary(texts: Iterable<string>, minCount = 4): Set<string> {
   const counts = new Map<string, number>();
-  for (const text of texts) for (const token of text.slice(0, 3000).toLowerCase().match(/\b[a-z]{5,18}\b/g) ?? []) counts.set(token, (counts.get(token) ?? 0) + 1);
+  for (const text of texts) for (const token of text.slice(0, 3000).toLowerCase().match(/\b[a-z]{5,18}\b/g) ?? []) {
+    const n = counts.get(token);
+    if (n === undefined) counts.set(detach(token), 1); else counts.set(token, n + 1);
+  }
   return new Set([...counts].filter(([, n]) => n >= minCount).map(([word]) => word));
 }
 
@@ -149,9 +152,18 @@ export function voiceOf(text: string): Voice {
   return { human, brief, typos };
 }
 
+/**
+ * A copy of `text` that owns its characters. JavaScriptCore substrings
+ * (slice, regex matches) share their parent's buffer, so a short key kept in a
+ * long-lived map can pin an entire message; corpus passes detach what they keep.
+ */
+export function detach(text: string): string {
+  return ` ${text}`.slice(1);
+}
+
 /** Normalized session opener used to detect templated (scripted) launches. */
 export function openerKey(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 160);
+  return detach(text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 160));
 }
 
 export interface CreatorInput {

@@ -10,7 +10,8 @@
  */
 import type { Database } from "bun:sqlite";
 import type { DB } from "../db/index.js";
-import { classifyUserText } from "./authorship.js";
+import { classifyUserText, detach } from "./authorship.js";
+import { bySession } from "./rows.js";
 
 export type Shape = "tiny" | "worker" | "conversation" | "wanderer" | "marathon";
 export const SHAPE_RULE_VERSION = 1;
@@ -47,14 +48,14 @@ export function tokenize(text: string): string[] {
 /** Document frequencies over units; `n` is the number of units seen. */
 export interface Corpus { df: Map<string, number>; n: number }
 
-export function buildCorpus(unitsBySession: Iterable<Unit[]>): Corpus {
-  const df = new Map<string, number>();
-  let n = 0;
-  for (const units of unitsBySession) for (const unit of units) {
-    n++;
-    for (const word of new Set(tokenize(unit.context))) df.set(word, (df.get(word) ?? 0) + 1);
+/** Count `units` into `df` and return how many there were. */
+function addToCorpus(df: Map<string, number>, units: Unit[]): number {
+  for (const unit of units) for (const word of new Set(tokenize(unit.context))) {
+    const seen = df.get(word);
+    // A token shares its message's buffer; the corpus keeps its own copy.
+    if (seen === undefined) df.set(detach(word), 1); else df.set(word, seen + 1);
   }
-  return { df, n };
+  return units.length;
 }
 
 function vector(texts: string[], corpus: Corpus): Map<string, number> {
@@ -163,25 +164,59 @@ export function plainTopic(text: string): string {
 
 interface Head { id: number; harness: string; native_id: string; total: number }
 export interface ShapeReport { sessions: number; shapes: Record<Shape, number>; episodes: number; ms: number }
+interface TextRow { sid: number; ordinal: number; ts: number | null; kind: string; role: string; text: string | null }
+interface SessionText { units: Unit[]; opener: string | null; compactions: number }
+
+/**
+ * Dialogue rows for shapes, in session order. Prose is only ever read 2000
+ * characters at a time, so SQLite trims it first: 2000 code points always
+ * cover the first 2000 UTF-16 units, and the JS slice is unchanged.
+ */
+function textRows(filter: string): string {
+  return `SELECT m.session_id AS sid, m.ordinal, m.ts, m.record_kind AS kind, m.role,
+      CASE WHEN m.record_kind='assistant_dialogue_prose' THEN substr(m.text,1,2000) ELSE m.text END AS text
+    FROM messages m JOIN sessions s ON s.id=m.session_id AND m.construction_generation=s.construction_generation
+   WHERE ${filter}(m.record_kind IN ('real_user','assistant_dialogue_prose')
+          OR (m.role='user' AND m.text LIKE '<command-name>/compact%'))
+   ORDER BY m.session_id, m.ordinal`;
+}
+
+/** md's turns (with the prose answering them), opener, and /compact count for one session. */
+function readSession(rows: Iterable<TextRow>): SessionText {
+  const units: Unit[] = [];
+  let opener: string | null = null, compactions = 0, pendingCompact = false;
+  for (const row of rows) {
+    const text = row.text ?? "";
+    if (row.kind === "assistant_dialogue_prose") {
+      const last = units.at(-1);
+      if (last && last.context.length < 6000) last.context += `\n${text.slice(0, 2000)}`;
+      continue;
+    }
+    const verdict = row.kind === "real_user" ? classifyUserText(text) : { author: "harness" as const, rule: "harness:compaction" };
+    if (verdict.rule === "harness:compaction" || /^\/compact\b/.test(text)) {
+      pendingCompact = true;
+      compactions++;
+      continue;
+    }
+    if (verdict.author !== "harness" && opener === null) opener = text.slice(0, 2000);
+    if (verdict.author !== "human") continue;
+    units.push({ ordinal: row.ordinal, ts: row.ts, human: text.slice(0, 4000), context: text.slice(0, 4000), compactBefore: pendingCompact });
+    pendingCompact = false;
+  }
+  return { units, opener, compactions };
+}
 
 /** Recompute shapes and episodes; model-written episode labels survive when their span is unchanged. */
 export function computeShapes(archive: DB, layers: Database, options: { now?: number } = {}): ShapeReport {
   const started = performance.now();
   const now = options.now ?? Date.now();
-  const heads = archive.query(`SELECT id,harness,native_id,(tok_user+tok_assistant+tok_tool) AS total FROM sessions`).all() as Head[];
+  const heads = archive.query(`SELECT id,harness,native_id,(tok_user+tok_assistant+tok_tool) AS total FROM sessions ORDER BY id`).all() as Head[];
   const creators = new Map((layers.query(`SELECT harness||char(31)||native_id AS k, started_by FROM session_creator`).all() as { k: string; started_by: ShapeInput["startedBy"] }[]).map((r) => [r.k, r.started_by]));
   const toolCalls = new Map((archive.query(
     `SELECT m.session_id AS sid, COUNT(*) AS n FROM tool_activities t JOIN messages m ON m.id=t.raw_record_id
       JOIN sessions s ON s.id=m.session_id AND t.construction_generation=s.construction_generation
      WHERE t.activity_kind='call' GROUP BY m.session_id`,
   ).all() as { sid: number; n: number }[]).map((r) => [r.sid, r.n]));
-  const rows = archive.query(
-    `SELECT m.session_id AS sid, m.ordinal, m.ts, m.record_kind AS kind, m.role, m.text FROM messages m
-       JOIN sessions s ON s.id=m.session_id AND m.construction_generation=s.construction_generation
-      WHERE m.record_kind IN ('real_user','assistant_dialogue_prose')
-         OR (m.role='user' AND m.text LIKE '<command-name>/compact%')
-      ORDER BY m.session_id, m.ordinal`,
-  ).all() as { sid: number; ordinal: number; ts: number | null; kind: string; role: string; text: string | null }[];
 
   // Source-enumerated compaction seams (Claude compact_boundary, Prime, Kimi).
   // Real /compact commands rarely leave a matching user row, so text alone
@@ -194,33 +229,24 @@ export function computeShapes(archive: DB, layers: Database, options: { now?: nu
        JOIN sessions s ON s.id=p.session_id AND p.construction_generation=s.construction_generation
       WHERE e.kind='compaction' GROUP BY p.session_id`,
   ).all() as { sid: number; n: number }[]).map((r) => [r.sid, r.n]));
-  const unitsBySession = new Map<number, Unit[]>();
-  const openers = new Map<number, string>();
+
+  // Pass one streams the corpus a session at a time for word statistics and
+  // per-session counts. Only sessions that get segmented are read again.
+  const humanTurns = new Map<number, number>();
+  const topics = new Map<number, string>();
   const compactions = new Map<number, number>();
-  let pendingCompact = false, currentSid = -1;
-  for (const row of rows) {
-    if (row.sid !== currentSid) { currentSid = row.sid; pendingCompact = false; }
-    const text = row.text ?? "";
-    const units = unitsBySession.get(row.sid) ?? [];
-    if (row.kind === "assistant_dialogue_prose") {
-      const last = units.at(-1);
-      if (last && last.context.length < 6000) last.context += `\n${text.slice(0, 2000)}`;
-      continue;
-    }
-    const verdict = row.kind === "real_user" ? classifyUserText(text) : { author: "harness" as const, rule: "harness:compaction" };
-    if (verdict.rule === "harness:compaction" || /^\/compact\b/.test(text)) {
-      pendingCompact = true;
-      compactions.set(row.sid, (compactions.get(row.sid) ?? 0) + 1);
-      continue;
-    }
-    if (verdict.author !== "harness" && !openers.has(row.sid)) openers.set(row.sid, text.slice(0, 2000));
-    if (verdict.author !== "human") continue;
-    units.push({ ordinal: row.ordinal, ts: row.ts, human: text.slice(0, 4000), context: text.slice(0, 4000), compactBefore: pendingCompact });
-    pendingCompact = false;
-    unitsBySession.set(row.sid, units);
+  const df = new Map<string, number>();
+  let units = 0;
+  for (const [sid, rows] of bySession(archive.query(textRows("")).iterate() as Iterable<TextRow>)) {
+    const session = readSession(rows);
+    units += addToCorpus(df, session.units);
+    if (session.units.length > 0) humanTurns.set(sid, session.units.length);
+    if (session.opener !== null) topics.set(sid, detach(plainTopic(session.opener)));
+    if (session.compactions > 0) compactions.set(sid, session.compactions);
   }
   for (const [sid, n] of boundaries) if (n > (compactions.get(sid) ?? 0)) compactions.set(sid, n);
-  const corpus = buildCorpus(unitsBySession.values());
+  const corpus: Corpus = { df, n: units };
+  const sessionRows = archive.query(textRows("m.session_id=? AND "));
 
   const labels = new Map((layers.query(
     `SELECT harness||char(31)||native_id||char(31)||start_ordinal||char(31)||end_ordinal AS k, label, label_source, label_model, labeled_at FROM session_episodes WHERE label IS NOT NULL`,
@@ -249,12 +275,17 @@ export function computeShapes(archive: DB, layers: Database, options: { now?: nu
   );
   layers.transaction(() => {
     for (const head of heads) {
-      const units = unitsBySession.get(head.id) ?? [];
       const startedBy = creators.get(`${head.harness}\u001f${head.native_id}`) ?? "unknown";
-      const episodes = startedBy === "agent" || units.length < 10 ? [] : segment(units, corpus);
-      const shape = classifyShape({ humanTurns: units.length, startedBy, toolCalls: toolCalls.get(head.id) ?? 0, totalTokens: head.total, compactions: compactions.get(head.id) ?? 0, episodes: episodes.length });
-      const topic = shape === "tiny" || shape === "worker" ? plainTopic(openers.get(head.id) ?? "") || null : null;
-      upsertShape.run(head.harness, head.native_id, head.id, shape, topic, units.length, toolCalls.get(head.id) ?? 0, head.total, compactions.get(head.id) ?? 0, episodes.length, SHAPE_RULE_VERSION, now);
+      let turns = humanTurns.get(head.id) ?? 0;
+      let episodes: Episode[] = [];
+      if (startedBy !== "agent" && turns >= 10) {
+        const { units } = readSession(sessionRows.all(head.id) as TextRow[]);
+        turns = units.length;
+        if (units.length >= 10) episodes = segment(units, corpus);
+      }
+      const shape = classifyShape({ humanTurns: turns, startedBy, toolCalls: toolCalls.get(head.id) ?? 0, totalTokens: head.total, compactions: compactions.get(head.id) ?? 0, episodes: episodes.length });
+      const topic = shape === "tiny" || shape === "worker" ? topics.get(head.id) || null : null;
+      upsertShape.run(head.harness, head.native_id, head.id, shape, topic, turns, toolCalls.get(head.id) ?? 0, head.total, compactions.get(head.id) ?? 0, episodes.length, SHAPE_RULE_VERSION, now);
       clearEpisodes.run(head.harness, head.native_id);
       episodes.forEach((episode, n) => {
         const kept = labels.get(`${head.harness}\u001f${head.native_id}\u001f${episode.startOrdinal}\u001f${episode.endOrdinal}`);
