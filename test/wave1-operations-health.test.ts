@@ -246,3 +246,66 @@ test("Wave 1 operations — rebuild service requires confirmation and hard warni
   expect(warning).toContain("canonical jobs/attempts exactly by SessionKey");
   expect(warning).toContain("Missing stable targets block the swap");
 });
+
+test("Wave 1 operations — doctor judges a walk left incomplete by live-root churn on its last complete pass", async () => {
+  const { root, config } = fixture("doctor-churn");
+  const configPath = join(root, "fixture-config.toml");
+  const schedulePath = join(root, "fixture-schedule.plist");
+  writeFileSync(configPath, "fixture config\n", { mode: 0o600 });
+  writeFileSync(schedulePath, `${configPath}\n${config.dbPath}\n`, { mode: 0o600 });
+  const db = await openDb(config.dbPath);
+  const now = Date.now();
+  const digest = sourcePlanDigest(config);
+  const insertGroup = db.prepare(
+    `INSERT INTO reconciliation_groups(config_digest,trigger_kind,started_at,finished_at,status,enabled_source_count,complete_source_count)
+     VALUES (?,'scheduled',?,?,?,1,?)`,
+  );
+  const insertSource = db.prepare(
+    `INSERT INTO reconciliation_sources(group_id,source,resolution_mode,resolved_roots_json,status,admissible_identity_count,archived_identity_count)
+     VALUES (?,'claude','replace',?,?,?,?)`,
+  );
+  const insertRoot = db.prepare(
+    `INSERT INTO reconciliation_roots(reconciliation_source_id,root_ordinal,root,reachability,started_at,finished_at,changed_during_walk,physical_unit_count,canonical_candidate_count)
+     VALUES (?,0,?,'reachable',?,?,?,1,1)`,
+  );
+  const id = (result: unknown) => Number((result as { lastInsertRowid: number | bigint }).lastInsertRowid);
+  const completeGroup = id(insertGroup.run(digest, now - 3000, now - 2000, "complete", 1));
+  insertRoot.run(id(insertSource.run(completeGroup, JSON.stringify([root]), "complete", 1, 1)), root, now - 3000, now - 2000, 0);
+  const churnGroup = id(insertGroup.run(digest, now - 1500, now - 1000, "incomplete", 0));
+  const churnSource = id(insertSource.run(churnGroup, JSON.stringify([root]), "incomplete", null, null));
+  insertRoot.run(churnSource, root, now - 1500, now - 1000, 1);
+  db.prepare(
+    `INSERT INTO source_schedule_state(source,config_digest,expected_interval_ms,degraded_after_ms,stale_after_ms,schedule_kind,schedule_path,
+       target_config_path,target_db_path,last_scheduled_group_id,updated_at)
+     VALUES ('claude',?,1800000,5400000,21600000,'launchd',?,?,?,?,?)`,
+  ).run(digest, schedulePath, configPath, config.dbPath, churnGroup, now - 1000);
+  const line = (report: ReturnType<typeof collectDoctorReport>, axis: string) => report.lines.find((item) => item.includes("claude") && item.includes(axis)) ?? "";
+  const completedAt = (ms: number) => db.prepare(`UPDATE reconciliation_groups SET finished_at=? WHERE id=?`).run(ms, completeGroup);
+
+  const fresh = collectDoctorReport(db, config, now, configPath);
+  expect(line(fresh, "full reconciliation")).toContain("[ok]");
+  expect(line(fresh, "full reconciliation")).toContain("roots changed during walk · last complete 2s ago · denominator 1");
+  expect(line(fresh, "schedule")).toContain("[ok]");
+  expect(line(fresh, "schedule")).toContain("source incomplete (roots changed during walk)");
+  expect(fresh.status).toBe("healthy");
+
+  completedAt(now - 2 * 60 * 60_000);
+  const aging = collectDoctorReport(db, config, now, configPath);
+  expect(line(aging, "full reconciliation")).toContain("[DEGRADED]");
+  expect(line(aging, "schedule")).toContain("[ok]");
+  expect(aging.status).toBe("degraded");
+
+  completedAt(now - 7 * 60 * 60_000);
+  expect(line(collectDoctorReport(db, config, now, configPath), "full reconciliation")).toContain("[DOWN]");
+
+  // Anything beyond churn (unit errors, an unclean root) keeps the incomplete pass DOWN.
+  completedAt(now - 2000);
+  db.prepare(`UPDATE reconciliation_sources SET error_unit_count=1 WHERE id=?`).run(churnSource);
+  const errored = collectDoctorReport(db, config, now, configPath);
+  expect(line(errored, "full reconciliation")).toContain("[DOWN]");
+  expect(line(errored, "schedule")).toContain("[DOWN]");
+  db.prepare(`UPDATE reconciliation_sources SET error_unit_count=0 WHERE id=?`).run(churnSource);
+  db.prepare(`UPDATE reconciliation_roots SET changed_during_walk=0 WHERE reconciliation_source_id=?`).run(churnSource);
+  expect(line(collectDoctorReport(db, config, now, configPath), "full reconciliation")).toContain("[DOWN]");
+  db.close();
+});

@@ -17,7 +17,8 @@ type Severity="healthy"|"degraded"|"down";
 interface LatestSource {group_id:number;source_id:number;started_at:number;finished_at:number|null;source_status:string;resolution_mode:string;disabled_reason:string|null;physical_unit_count:number;canonical_candidate_count:number;admissible_identity_count:number|null;archived_identity_count:number|null;duplicate_candidate_count:number;rejected_unit_count:number;error_unit_count:number;snapshot_only_count:number;unresolved_lineage_count:number;resolved_roots_json:string;}
 interface RootRow {root_ordinal:number;root:string;reachability:string;finished_at:number|null;end_change_token:string|null;changed_during_walk:number|null;physical_unit_count:number;canonical_candidate_count:number;error:string|null;}
 interface ScheduleRow {expected_interval_ms:number;degraded_after_ms:number;stale_after_ms:number;schedule_kind:string|null;schedule_path:string|null;target_config_path:string;target_db_path:string;last_scheduled_group_id:number|null;}
-interface ScheduledSource {finished_at:number|null;source_status:string|null;}
+interface ScheduledSource {finished_at:number|null;source_id:number|null;source_status:string|null;error_unit_count:number|null;}
+interface CompletePass {finished_at:number|null;admissible_identity_count:number|null;archived_identity_count:number|null;}
 
 /**
  * Targeted ingestion normally completes within a few minutes. Doctor reports
@@ -43,20 +44,31 @@ export function collectDoctorReport(db:DB,config:Config,now=Date.now(),configPat
   if(plan.mode==="disabled"){intentionallyPartial=true;continue;}
   const latest=db.prepare(`SELECT g.id group_id,rs.id source_id,g.started_at,g.finished_at,rs.status source_status,rs.resolution_mode,rs.disabled_reason,rs.physical_unit_count,rs.canonical_candidate_count,rs.admissible_identity_count,rs.archived_identity_count,rs.duplicate_candidate_count,rs.rejected_unit_count,rs.error_unit_count,rs.snapshot_only_count,rs.unresolved_lineage_count,rs.resolved_roots_json FROM reconciliation_groups g JOIN reconciliation_sources rs ON rs.group_id=g.id WHERE g.config_digest=? AND rs.source=? AND g.finished_at IS NOT NULL ORDER BY g.id DESC LIMIT 1`).get(digest,source) as LatestSource|null;
   let rootNewer=false,rootDown=false;
+  // A live root is routinely newer than the last walk; that is backlog for the
+  // next scheduled walk, and only degrades once walks stop arriving.
+  const overdueMs=(db.prepare(`SELECT degraded_after_ms FROM source_schedule_state WHERE source=?`).get(source) as {degraded_after_ms:number}|null)?.degraded_after_ms??thresholds.full_walk_degraded_after_ms;
+  const walkOverdue=!latest?.finished_at||now-latest.finished_at>overdueMs;
   const roots=latest?db.prepare(`SELECT rr.* FROM reconciliation_roots rr WHERE rr.reconciliation_source_id=? ORDER BY root_ordinal`).all(latest.source_id) as RootRow[]:[];
   for(const [ordinal,root] of plan.roots.entries()){
     const prior=roots.find(row=>row.root_ordinal===ordinal&&row.root===root);const current=computeRootChangeToken(root);const reachable=current!==null;const knownNewer=reachable&&knownUnitNewer(db,source,root);const newer=reachable&&prior?.end_change_token?current!==prior.end_change_token||knownNewer:null;
-    if(!reachable){rootDown=true;elevate("down");}else if(newer){rootNewer=true;elevate("degraded");}
-    lines.push(`  [${reachable?(newer?"DEGRADED":"ok"):"DOWN"}] ${pad(source,7)} root ${ordinal+1} reachability · ${reachable?"reachable":"unreachable"} · root newer ${newer===null?"unknown":newer?"yes":"no"}${prior?.error?` · ${prior.error}`:""}`);
+    const behind=Boolean(newer&&walkOverdue);
+    if(!reachable){rootDown=true;elevate("down");}else if(behind){rootNewer=true;elevate("degraded");}
+    lines.push(`  [${reachable?(behind?"DEGRADED":"ok"):"DOWN"}] ${pad(source,7)} root ${ordinal+1} reachability · ${reachable?"reachable":"unreachable"} · root newer ${newer===null?"unknown":newer?behind?"yes · walk overdue":"yes · next walk due":"no"}${prior?.error?` · ${prior.error}`:""}`);
   }
   if(!latest){elevate("down");lines.push(`  [DOWN] ${pad(source,7)} full reconciliation · never · denominator unknown`);}
   else{
-    const ageMs=latest.finished_at===null?Infinity:now-latest.finished_at;let state:Severity=latest.source_status==="complete"?"healthy":"down";
+    // Live roots that change mid-walk leave a pass incomplete (orphan marking
+    // waits) without anything being wrong; the last complete pass then sets
+    // the age, on the same degraded/stale clock.
+    const churn=latest.source_status!=="complete"&&latest.error_unit_count===0&&walkChurnOnly(db,latest.source_id);
+    const basis=churn?lastComplete(db,digest,source):latest.source_status==="complete"?latest:null;
+    const ageMs=basis?.finished_at==null?Infinity:now-basis.finished_at;let state:Severity=basis?"healthy":"down";
     if(state==="healthy"&&ageMs>thresholds.full_walk_stale_after_ms)state="down";else if(state==="healthy"&&ageMs>thresholds.full_walk_degraded_after_ms)state="degraded";
     if(rootNewer&&state==="healthy")state="degraded";if(rootDown)state="down";elevate(state);
-    const denominator=state==="down"||latest.admissible_identity_count===null?"unknown":String(latest.admissible_identity_count);
-    const percentage=denominator==="unknown"?"":` · ${latest.archived_identity_count}/${denominator}`;
-    lines.push(`  [${label(state)}] ${pad(source,7)} full reconciliation · ${age(latest.finished_at,now)} · ${latest.source_status} · denominator ${denominator}${percentage} · observed ${interval(latest.started_at,latest.finished_at)}`);
+    const denominator=state==="down"||basis?.admissible_identity_count==null?"unknown":String(basis.admissible_identity_count);
+    const percentage=denominator==="unknown"?"":` · ${basis!.archived_identity_count}/${denominator}`;
+    const status=churn?`incomplete · roots changed during walk · last complete ${age(basis?.finished_at??null,now)}`:latest.source_status;
+    lines.push(`  [${label(state)}] ${pad(source,7)} full reconciliation · ${age(latest.finished_at,now)} · ${status} · denominator ${denominator}${percentage} · observed ${interval(latest.started_at,latest.finished_at)}`);
     lines.push(`  [${latest.error_unit_count?"DOWN":"ok"}] ${pad(source,7)} quality · physical ${latest.physical_unit_count} · canonical ${latest.canonical_candidate_count} · unique ${latest.admissible_identity_count??"unknown"} · duplicate ${latest.duplicate_candidate_count} · rejected ${latest.rejected_unit_count} · errors ${latest.error_unit_count}`);
   }
   const hook=db.prepare(`SELECT status,started_at,finished_at,error FROM targeted_ingest_runs WHERE source=? ORDER BY id DESC LIMIT 1`).get(source) as {status:string;started_at:number;finished_at:number|null;error:string|null}|null;
@@ -71,10 +83,11 @@ export function collectDoctorReport(db:DB,config:Config,now=Date.now(),configPat
   const schedule=db.prepare(`SELECT expected_interval_ms,degraded_after_ms,stale_after_ms,schedule_kind,schedule_path,target_config_path,target_db_path,last_scheduled_group_id FROM source_schedule_state WHERE source=?`).get(source) as ScheduleRow|null;
   const loaded=schedule?.schedule_kind==="launchd"&&schedule.schedule_path?cachedLaunchdStatus(schedule.schedule_path,launchdStatusCache):null;
   const scheduleOk=Boolean(schedule?.schedule_kind&&schedule.schedule_path&&scheduleArtifactMatches(schedule.schedule_path,schedule.target_config_path)&&schedule.target_config_path===configPath&&schedule.target_db_path===config.dbPath&&loaded!==false);
-  const scheduledSource=schedule?.last_scheduled_group_id?db.prepare(`SELECT g.finished_at,rs.status source_status FROM reconciliation_groups g LEFT JOIN reconciliation_sources rs ON rs.group_id=g.id AND rs.source=? WHERE g.id=?`).get(source,schedule.last_scheduled_group_id) as ScheduledSource|null:null;
-  const cadenceOk=Boolean(scheduledSource?.finished_at&&now-scheduledSource.finished_at<=thresholds.full_walk_stale_after_ms&&scheduledSource.source_status==="complete");
+  const scheduledSource=schedule?.last_scheduled_group_id?db.prepare(`SELECT g.finished_at,rs.id source_id,rs.status source_status,rs.error_unit_count FROM reconciliation_groups g LEFT JOIN reconciliation_sources rs ON rs.group_id=g.id AND rs.source=? WHERE g.id=?`).get(source,schedule.last_scheduled_group_id) as ScheduledSource|null:null;
+  const scheduledChurn=Boolean(scheduledSource?.source_id&&scheduledSource.source_status!=="complete"&&scheduledSource.error_unit_count===0&&walkChurnOnly(db,scheduledSource.source_id));
+  const cadenceOk=Boolean(scheduledSource?.finished_at&&now-scheduledSource.finished_at<=thresholds.full_walk_stale_after_ms&&(scheduledSource.source_status==="complete"||scheduledChurn));
   if(!scheduleOk||!cadenceOk)elevate("down");
-  lines.push(`  [${scheduleOk&&cadenceOk?"ok":"DOWN"}] ${pad(source,7)} schedule · ${schedule?.schedule_kind??"missing"} ${schedule?.schedule_path?homePath(schedule.schedule_path):"path missing"}${loaded===false?" · service unloaded":""} · interval ${duration(schedule?.expected_interval_ms??thresholds.full_walk_interval_ms)} · last scheduled ${scheduledSource?age(scheduledSource.finished_at,now):"never"} · source ${scheduledSource?.source_status??"missing"} · target ${homePath(configPath)} → ${homePath(config.dbPath)}`);
+  lines.push(`  [${scheduleOk&&cadenceOk?"ok":"DOWN"}] ${pad(source,7)} schedule · ${schedule?.schedule_kind??"missing"} ${schedule?.schedule_path?homePath(schedule.schedule_path):"path missing"}${loaded===false?" · service unloaded":""} · interval ${duration(schedule?.expected_interval_ms??thresholds.full_walk_interval_ms)} · last scheduled ${scheduledSource?age(scheduledSource.finished_at,now):"never"} · source ${scheduledSource?.source_status??"missing"}${scheduledChurn?" (roots changed during walk)":""} · target ${homePath(configPath)} → ${homePath(config.dbPath)}`);
   const snapshot=count(db,`SELECT COUNT(*) n FROM sessions WHERE harness='${source}' AND source_validation_status='snapshot_only'`);
   const unresolved=Number((db.prepare(`SELECT COUNT(*) n FROM lineage_claims lc JOIN sessions s ON s.id=lc.session_id WHERE s.harness=? AND lc.resolution_status!='resolved'`).get(source) as {n:number}).n);
   lines.push(`  [${snapshot?"--":"ok"}] ${pad(source,7)} snapshot-only · ${snapshot}`);
@@ -123,6 +136,9 @@ function knownUnitNewer(db:DB,source:string,root:string):boolean{const rows=db.p
 function scheduleArtifactMatches(path:string,configPath:string):boolean{try{if(!statSync(path).isFile())return false;return readFileSync(path,"utf8").includes(configPath);}catch{return false;}}
 function cachedLaunchdStatus(path:string,cache:Map<string,boolean|null>):boolean|null{if(cache.has(path))return cache.get(path)!;const status=launchdStatus(path);cache.set(path,status);return status;}
 function launchdStatus(path:string):boolean|null{if(process.platform!=="darwin")return null;let text:string;try{text=readFileSync(path,"utf8");}catch{return null;}const label=text.match(/<key>Label<\/key>\s*<string>([^<]+)<\/string>/)?.[1];const uid=typeof process.getuid==="function"?process.getuid():null;if(!label||uid===null)return null;try{execFileSync("/bin/launchctl",["print",`gui/${uid}/${label}`],{stdio:"ignore",timeout:1000});return true;}catch{return false;}}
+/** Every root reachable and clean, and at least one changed while it was walked: the same rule `atlas index` exits 0 on. */
+function walkChurnOnly(db:DB,sourceId:number):boolean{const row=db.prepare(`SELECT COUNT(*) total,COALESCE(SUM(reachability='reachable' AND error IS NULL),0) clean,COALESCE(SUM(changed_during_walk=1),0) changed FROM reconciliation_roots WHERE reconciliation_source_id=?`).get(sourceId) as {total:number;clean:number;changed:number};return row.total>0&&row.clean===row.total&&row.changed>0;}
+function lastComplete(db:DB,digest:string,source:string):CompletePass|null{return db.prepare(`SELECT g.finished_at,rs.admissible_identity_count,rs.archived_identity_count FROM reconciliation_groups g JOIN reconciliation_sources rs ON rs.group_id=g.id WHERE g.config_digest=? AND rs.source=? AND rs.status='complete' AND g.finished_at IS NOT NULL ORDER BY g.id DESC LIMIT 1`).get(digest,source) as CompletePass|null;}
 function count(db:DB,sql:string):number{return Number((db.prepare(sql).get() as {n:number}).n);}
 function age(timestamp:number|null,now:number):string{if(!timestamp)return "never";return `${duration(Math.max(0,now-timestamp))} ago`;}
 function duration(ms:number):string{const s=Math.floor(ms/1000);if(s<60)return `${s}s`;if(s<3600)return `${Math.floor(s/60)}m`;if(s<86400)return `${Math.floor(s/3600)}h`;return `${(s/86400).toFixed(2)}d`;}
