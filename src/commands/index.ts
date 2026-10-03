@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { ingest } from "../ingest.js";
 import { retryPendingFavorites } from "../favorites.js";
 import { withConstructionCtx, hasFlag } from "./ctx.js";
@@ -25,7 +26,8 @@ export async function indexCmd(argv:string[],options:IndexCommandOptions={}):Pro
       if(churnOnly)process.stdout.write(`atlas index · ${incomplete.map(summary=>summary.source).join(", ")} changed during walk · published, orphan marking deferred to the next run\n`);
       const favorites=retryPendingFavorites(db,{defaultSpan:config.tunables.fav_default_span});
       if(favorites.materialized>0)process.stdout.write(`atlas index · materialized ${favorites.materialized} pending favorite(s)\n`);
-      refreshLayers(db,dbPath,(line)=>process.stdout.write(`atlas index · ${line}\n`));
+      if(scheduled&&!options.storageProbe)refreshLayersIsolated(configPath);
+      else refreshLayers(db,dbPath,(line)=>process.stdout.write(`atlas index · ${line}\n`));
       const disabled=summaries.filter(summary=>summary.mode==="disabled");
       if(disabled.length)process.stdout.write(`atlas index · coverage intentionally partial · disabled: ${disabled.map(summary=>`${summary.source} (${summary.disabledReason})`).join(", ")}\n`);
     },{storageProbe:options.storageProbe});
@@ -35,6 +37,17 @@ export async function indexCmd(argv:string[],options:IndexCommandOptions={}):Pro
     return 1;
   }
   return healthy?0:1;
+}
+/**
+ * Scheduled runs refresh layers in a child process. The walk leaves native
+ * allocations the layers' JS heap cannot reuse, so in one process their peaks
+ * add (about 1 GB on the live archive); the child starts clean and hands its
+ * memory back on exit. A layer failure never fails ingest.
+ */
+function refreshLayersIsolated(configPath:string):void{
+  Bun.gc(true);
+  const child=Bun.spawnSync([process.execPath,"run",join(import.meta.dir,"..","cli.ts"),"layers","all","--config",configPath],{stdout:"inherit",stderr:"inherit"});
+  if(child.exitCode!==0)process.stdout.write(`atlas index · layers skipped: exit ${child.exitCode}\n`);
 }
 export function walkChurnOnly(s:Awaited<ReturnType<typeof ingest>>[number]):boolean{
   return s.roots.length>0&&s.roots.every(root=>root.reachable&&!root.error&&(root.unitErrors??0)===0)&&s.roots.some(root=>root.changedDuringWalk===true);
