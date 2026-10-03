@@ -307,17 +307,19 @@ export function readDashboardAnalytics(
     }
   }
 
+  // The work queue (job_work, one row per target) and its attempts are the
+  // summarizer's record; the pre-v11 jobs table only holds imported history.
   const summarizerRow = db.prepare(
     `SELECT
-       SUM(CASE WHEN status='pending' AND kind IN ('tier1','tier2') THEN 1 ELSE 0 END) queue,
-       SUM(CASE WHEN status='done' AND kind IN ('tier1','tier2') AND updated_at >= ? THEN 1 ELSE 0 END) completed,
-       SUM(CASE WHEN kind IN ('tier1','tier2') AND
-         (status='failed' OR (status='pending' AND last_error IS NOT NULL)) THEN 1 ELSE 0 END) failures
-     FROM jobs`,
+       SUM(CASE WHEN current_status='pending' THEN 1 ELSE 0 END) queue,
+       (SELECT COUNT(*) FROM job_attempts a JOIN job_work aw ON aw.id=a.work_id
+         WHERE a.status='done' AND aw.kind IN ('tier1','tier2') AND a.finished_at >= ?) completed,
+       SUM(CASE WHEN current_status='failed' OR (current_status='pending' AND current_error IS NOT NULL) THEN 1 ELSE 0 END) failures
+     FROM job_work WHERE kind IN ('tier1','tier2')`,
   ).get(now - 3_600_000) as Record<string, number | null> | null;
   const providerRow = db.prepare(
-    `SELECT provider FROM jobs WHERE provider IS NOT NULL AND provider != ''
-     ORDER BY updated_at DESC, id DESC LIMIT 1`,
+    `SELECT provider FROM job_attempts WHERE provider IS NOT NULL AND provider != ''
+     ORDER BY COALESCE(finished_at, created_at) DESC, id DESC LIMIT 1`,
   ).get() as { provider: string } | null;
   const completedLastHour = Number(summarizerRow?.completed ?? 0);
   const failures = Number(summarizerRow?.failures ?? 0);
@@ -340,8 +342,9 @@ export function readDashboardAnalytics(
   const errorCount = failures + latestIngestErrors;
 
   const jobEvents = db.prepare(
-    `SELECT id, kind, session_id, status, updated_at, provider, last_error
-     FROM jobs WHERE updated_at IS NOT NULL ORDER BY updated_at DESC, id DESC LIMIT 8`,
+    `SELECT w.id, w.kind, s.id session_id, w.current_status status, w.updated_at, w.provider, w.current_error last_error
+     FROM job_work w LEFT JOIN sessions s ON s.harness=w.target_harness AND s.native_id=w.target_native_id
+     ORDER BY w.updated_at DESC, w.id DESC LIMIT 8`,
   ).all() as Array<{
     id: number;
     kind: string;
@@ -488,8 +491,12 @@ export function readDashboardRowStates(
   const stateRows = db.query(
     `SELECT s.id, s.harness, s.native_id, s.orphaned,
        EXISTS(SELECT 1 FROM summaries sm WHERE sm.session_id=s.id AND sm.tier=1) summarized,
-       EXISTS(SELECT 1 FROM jobs j WHERE j.session_id=s.id AND
-         (j.status='failed' OR (j.status='pending' AND j.last_error IS NOT NULL))) failed
+       -- One equality probe per status keeps both on idx_job_work_status; an IN/OR
+       -- status test makes SQLite scan every job row for every visible row.
+       (EXISTS(SELECT 1 FROM job_work j WHERE j.current_status='failed' AND j.kind IN ('tier1','tier2')
+           AND j.target_harness=s.harness AND j.target_native_id=s.native_id)
+        OR EXISTS(SELECT 1 FROM job_work j WHERE j.current_status='pending' AND j.current_error IS NOT NULL AND j.kind IN ('tier1','tier2')
+           AND j.target_harness=s.harness AND j.target_native_id=s.native_id)) failed
      FROM sessions s WHERE s.id IN (${placeholders})`,
   ).all(...ids) as Array<{
     id: number;

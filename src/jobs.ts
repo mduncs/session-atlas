@@ -48,6 +48,14 @@ export function finishWork(db:DB,workId:number,owner:string,status:"done"|"faile
   return true;};return db.inTransaction?apply():db.transaction(apply).immediate();
 }
 export function blockWork(db:DB,input:WorkInput,reason="no provider configured or authorized"):number{return ensureWork(db,input,"blocked",reason);}
+/** Settle a target's outstanding work of `kind` that was completed outside the queue (an on-demand tier-2), recording the attempt. */
+export function settleWork(db:DB,kind:string,sessionId:number,provider:string|null,now=Date.now()):number{
+ const apply=()=>{const target=stableTarget(db,sessionId);const revision=(db.prepare(`SELECT construction_generation FROM sessions WHERE id=?`).get(sessionId) as {construction_generation:string}).construction_generation;
+  const rows=db.prepare(`SELECT id,attempt_count FROM job_work WHERE kind=? AND target_harness=? AND target_native_id=? AND current_status IN ('pending','blocked')`).all(kind,target.harness,target.nativeId) as Array<{id:number;attempt_count:number}>;
+  for(const row of rows){const ord=row.attempt_count+1;db.prepare(`INSERT INTO job_attempts(work_id,attempt_ordinal,status,provider,input_revision,started_at,finished_at,created_at) VALUES (?,?,'done',?,?,?,?,?)`).run(row.id,ord,provider,revision,now,now,now);db.prepare(`UPDATE job_work SET current_status='done',current_error=NULL,blocked_reason=NULL,provider=?,attempt_count=?,next_attempt_at=NULL,updated_at=? WHERE id=?`).run(provider,ord,now,row.id);}
+  return rows.length;};
+ return db.inTransaction?apply():db.transaction(apply).immediate();
+}
 export function newestRelevantError(db:DB,workId:number):string|null{return (db.prepare(`SELECT error FROM job_attempts WHERE work_id=? AND error IS NOT NULL ORDER BY attempt_ordinal DESC,id DESC LIMIT 1`).get(workId) as {error:string}|null)?.error??null;}
 export function backoffMs(attempt:number):number{return Math.min(60*60_000,Math.max(1,2**Math.max(0,attempt-1))*30_000);}
 function stableTarget(db:DB,sessionId:number|null):{harness:string;nativeId:string}{if(sessionId===null)return {harness:"",nativeId:""};const row=db.prepare(`SELECT harness,native_id FROM sessions WHERE id=?`).get(sessionId) as {harness:string;native_id:string}|null;if(!row)throw new Error(`job target session missing: ${sessionId}`);return {harness:row.harness,nativeId:row.native_id};}

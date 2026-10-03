@@ -285,10 +285,12 @@ export function compileSessionFilter(
       predicates.push(`NOT EXISTS (SELECT 1 FROM summaries fs WHERE fs.session_id=${alias}.id AND fs.tier=1)`);
       break;
     case "pending":
-      predicates.push(`EXISTS (SELECT 1 FROM jobs fj WHERE fj.session_id=${alias}.id AND fj.status='pending')`);
+      // Status leads so the probe seeks idx_job_work_status: open work is a
+      // handful of rows, while done and superseded history grows without bound.
+      predicates.push(`EXISTS (SELECT 1 FROM job_work fj WHERE fj.current_status='pending' AND fj.kind IN ('tier1','tier2') AND fj.target_harness=${alias}.harness AND fj.target_native_id=${alias}.native_id)`);
       break;
     case "failed":
-      predicates.push(`EXISTS (SELECT 1 FROM jobs fj WHERE fj.session_id=${alias}.id AND fj.status='failed')`);
+      predicates.push(`EXISTS (SELECT 1 FROM job_work fj WHERE fj.current_status='failed' AND fj.kind IN ('tier1','tier2') AND fj.target_harness=${alias}.harness AND fj.target_native_id=${alias}.native_id)`);
       break;
   }
   if (filter.chain?.mode === "chained") predicates.push(`${alias}.chain_id IS NOT NULL`);

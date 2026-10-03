@@ -349,8 +349,10 @@ test("anchorless tier-2 remains visible and pending until a later valid retry", 
 
   const repaired = await summarizeTier2(db, cfg, sid);
   expect(repaired.status).toBe("summarized");
-  expect((db.prepare(`SELECT current_status FROM job_work WHERE id=?`).get(retryWork.id) as { current_status: string }).current_status).toBe("blocked");
-  expect((db.prepare(`SELECT status,error FROM job_attempts WHERE work_id=? ORDER BY attempt_ordinal DESC LIMIT 1`).get(retryWork.id) as { status: string; error: string }).status).toBe("blocked");
+  // The valid retry settles the work it left, so the cache is trusted again.
+  expect((db.prepare(`SELECT current_status FROM job_work WHERE id=?`).get(retryWork.id) as { current_status: string }).current_status).toBe("done");
+  expect((db.prepare(`SELECT status,error FROM job_attempts WHERE work_id=? ORDER BY attempt_ordinal DESC LIMIT 1`).get(retryWork.id) as { status: string; error: string }).status).toBe("done");
+  expect((await summarizeTier2(db, cfg, sid)).status).toBe("cached");
   expect((db.prepare(`SELECT COUNT(*) n FROM summary_anchors`).get() as { n: number }).n).toBe(1);
 });
 

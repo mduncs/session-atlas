@@ -57,14 +57,16 @@ function fixture(): Database {
       source,root,started_at,finished_at,reachable,sessions_seen,bytes_consumed,error
     ) VALUES (?,?,?,?,?,?,?,?)`,
   ).run("codex", "/src", NOW - 50_000, NOW - 40_000, 0, 1, 100, "root busy");
+  const work = db.prepare(
+    `INSERT INTO job_work(kind,target_harness,target_native_id,input_version,current_status,attempt_count,current_error,provider,created_at,updated_at)
+     VALUES ('tier1','claude',?,?,?,?,?,?,?,?)`,
+  );
+  const done = Number((work.run("cl-1", "tier1:fixture-1", "done", 1, null, "zai-glm-air", NOW - 50_000, NOW - 30_000) as { lastInsertRowid: number | bigint }).lastInsertRowid);
   db.prepare(
-    `INSERT INTO jobs(kind,session_id,scope,status,attempts,last_error,provider,created_at,updated_at)
-     VALUES ('tier1',1,NULL,'done',1,NULL,'zai-glm-air',?,?)`,
-  ).run(NOW - 50_000, NOW - 30_000);
-  db.prepare(
-    `INSERT INTO jobs(kind,session_id,scope,status,attempts,last_error,provider,created_at,updated_at)
-     VALUES ('tier1',2,NULL,'pending',2,'timeout',NULL,?,?)`,
-  ).run(NOW - 20_000, NOW - 5_000);
+    `INSERT INTO job_attempts(work_id,attempt_ordinal,status,provider,input_revision,started_at,finished_at,created_at)
+     VALUES (?,1,'done','zai-glm-air','fixture-1',?,?,?)`,
+  ).run(done, NOW - 40_000, NOW - 30_000, NOW - 40_000);
+  work.run("cl-2", "tier1:fixture-2", "pending", 2, "timeout", null, NOW - 20_000, NOW - 5_000);
   return db;
 }
 

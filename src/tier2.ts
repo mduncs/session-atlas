@@ -17,6 +17,7 @@ import { isRefusal } from "./classify.js";
 import { buildSummaryTurns } from "./summarize.js";
 import { TIER2_SYSTEM, TIER2_MAX_TOKENS, tier2PromptVersion } from "./prompts/tier2.js";
 import { enqueueJob } from "./summarize.js";
+import { settleWork } from "./jobs.js";
 import { TaskSupervisor } from "./runtime/tasks.js";
 import { extractCitations, validateCitations, type Citation, type ToolEvidence } from "./chat.js";
 
@@ -77,7 +78,8 @@ export async function summarizeTier2(
     const retryPending = Boolean(
       db
         .prepare(
-          `SELECT 1 ok FROM jobs WHERE session_id=? AND kind='tier2' AND status='pending' LIMIT 1`,
+          `SELECT 1 ok FROM job_work w JOIN sessions s ON s.harness=w.target_harness AND s.native_id=w.target_native_id
+            WHERE s.id=? AND w.kind='tier2' AND w.current_status IN ('pending','blocked') LIMIT 1`,
         )
         .get(sessionId),
     );
@@ -237,9 +239,8 @@ export function persistTier2Result(db: DB, input: PersistTier2Input): number {
     if (input.malformed) {
       enqueueJob(db, input.sessionId, "tier2", "malformed anchors — retry pending");
     } else {
-      db.prepare(
-        `UPDATE jobs SET status='done', updated_at=?, provider=? WHERE session_id=? AND kind='tier2' AND status='pending'`,
-      ).run(Date.now(), input.provider, input.sessionId);
+      // A clean result settles any retry an earlier malformed or blocked run left.
+      settleWork(db, "tier2", input.sessionId, input.provider);
     }
 
     bumpLastWrite(db);

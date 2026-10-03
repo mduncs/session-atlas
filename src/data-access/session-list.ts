@@ -456,5 +456,5 @@ export function sourceFreshness(db: DB): { source: string; ageMs: number | null;
 }
 
 export function pendingJobCount(db: DB): number {
-  return (db.prepare(`SELECT COUNT(*) n FROM jobs WHERE status='pending'`).get() as { n: number }).n;
+  return (db.prepare(`SELECT COUNT(*) n FROM job_work WHERE current_status='pending'`).get() as { n: number }).n;
 }
