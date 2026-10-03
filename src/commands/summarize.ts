@@ -156,6 +156,7 @@ function collectBackfillIds(
     ).map((r) => r.id);
   }
   // Newest-first unsummarized, plus summaries flagged stale (kept readable until replaced).
+  // Work an interrupted run left pending goes first, so it cannot age behind the backlog.
   return (
     db
       .prepare(
@@ -164,7 +165,9 @@ function collectBackfillIds(
          LEFT JOIN summaries sm ON sm.session_id=s.id AND sm.tier=1
          WHERE (sm.id IS NULL OR sm.needs_revalidation=1) AND s.construction_status='valid' AND cm.dialogue_turn_count > 0
            ${opts.origin ? `AND ${creatorFilterSql(opts.origin, "s")}` : ""}
-         ORDER BY s.last_activity DESC LIMIT ?`,
+         ORDER BY EXISTS(SELECT 1 FROM job_work j WHERE j.kind='tier1' AND j.current_status='pending'
+                           AND j.target_harness=s.harness AND j.target_native_id=s.native_id) DESC,
+                  s.last_activity DESC LIMIT ?`,
       )
       .all(opts.limit) as { id: number }[]
   ).map((r) => r.id);

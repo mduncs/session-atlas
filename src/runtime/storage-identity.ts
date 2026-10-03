@@ -53,15 +53,31 @@ export const defaultVolumeIdentityProbe: VolumeIdentityProbe = (mountPrefix) => 
     return { mounted: false, uuid: null, staleDirectoryPresent: true };
   }
 
-  const plist = execFileSync("/usr/sbin/diskutil", ["info", "-plist", mountPrefix], {
-    encoding: "utf8",
-    timeout: 2_000,
-    maxBuffer: 1024 * 1024,
-  });
+  const plist = diskutilInfo(mountPrefix);
   const uuid = /<key>VolumeUUID<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1]?.trim() ?? null;
   if (!uuid) throw new Error(`diskutil returned no VolumeUUID for ${mountPrefix}`);
   return { mounted: true, uuid, staleDirectoryPresent: false };
 };
+
+/**
+ * diskutil answers in well under a second but stalls for several under memory
+ * pressure; a 2 s cap refused whole index runs. A slow answer is still proof,
+ * so wait longer and retry one timeout before reporting the UUID unverified.
+ */
+function diskutilInfo(mountPrefix: string): string {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return execFileSync("/usr/sbin/diskutil", ["info", "-plist", mountPrefix], {
+        encoding: "utf8",
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      if (attempt >= 2 || errorCode(error) !== "ETIMEDOUT") throw error;
+    }
+  }
+}
 
 /** Resolve one configured prefix. A bare string represents an unconfigured prefix. */
 export function resolveVolumeIdentity(
