@@ -120,13 +120,16 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
               validate:record=>{validateIdentity(record,adapter.source);validateDraft(record,adapter.source);},
             });
             if(resolved.cache==="hit")work.sidecarHits++;else work.sidecarMisses++;
+            // A miss is durable on disk now; publication reloads it like a hit, so a
+            // source-wide miss never holds every parsed transcript at once.
+            resolved.prepared=null;
             if(resolved.header.outcome.kind==="rejected"){
               recordRejection(work,withOrdinal,resolved.header.outcome.reason,resolved.header.outcome.detail);
               continue;
             }
             const summary=resolved.header.outcome;
             work.canonical++;work.bytes+=summary.consumed;
-            work.candidates.push({src:withOrdinal,rootOrdinal:work.ordinal,nativeId:summary.nativeId,semanticBytes:summary.semanticBytes,consumed:summary.consumed,freshness:sourceFreshness(withOrdinal),generation:summary.constructionGeneration,record:null,sidecar:resolved,prepared:resolved.prepared});
+            work.candidates.push({src:withOrdinal,rootOrdinal:work.ordinal,nativeId:summary.nativeId,semanticBytes:summary.semanticBytes,consumed:summary.consumed,freshness:sourceFreshness(withOrdinal),generation:summary.constructionGeneration,record:null,sidecar:resolved,prepared:null});
           }else{
             work.sourceParses++;
             const admitted=parseAdmission(adapter,withOrdinal);
@@ -173,24 +176,33 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
       if(same){
         if(winner.sidecar){
           const summary=winner.sidecar.header.outcome as AdmittedSidecarSummary;
-          if(needsDerivedRepairSummary(db,existing.id,generation,summary)){
-            const prepared=materializeCandidate(winner,adapter,sidecarDir,roots[winner.rootOrdinal]!);
-            actions.push({kind:winner.generation===generation?"repair":"publish",winner,candidates,existing,generation:winner.generation,record:prepared.record,prepared});
-          }else actions.push({kind:"unchanged",winner,candidates,existing,generation,record:null,prepared:null});
+          if(needsDerivedRepairSummary(db,existing.id,generation,summary))actions.push({kind:"repair",winner,candidates,existing,generation,record:null,prepared:null});
+          else actions.push({kind:"unchanged",winner,candidates,existing,generation,record:null,prepared:null});
         }else{
           const record=winner.record!;const draft=validateDraft(record,adapter.source);
           actions.push({kind:needsDerivedRepair(db,existing.id,generation,record,draft)?"repair":"unchanged",winner,candidates,existing,generation,record,prepared:null});
         }
       }else{
-        if(winner.sidecar){const prepared=materializeCandidate(winner,adapter,sidecarDir,roots[winner.rootOrdinal]!);actions.push({kind:"publish",winner,candidates,existing,generation:winner.generation,record:prepared.record,prepared});}
+        if(winner.sidecar)actions.push({kind:"publish",winner,candidates,existing,generation:winner.generation,record:null,prepared:null});
         else actions.push({kind:"publish",winner,candidates,existing,generation,record:winner.record!,prepared:null});
       }
     }catch(error){const root=roots[winner.rootOrdinal]!;root.unitErrors++;root.complete=false;root.errors.push(`${winner.src.relPath}: ${errorMessage(error)}`);}
   }
 
+  // Planning defers sidecar loads; a load that fails is a unit error, as before.
+  const materializeAction=(action:Action):boolean=>{
+    if(!action.winner.sidecar||action.prepared||action.kind==="retain"||action.kind==="unchanged")return true;
+    try{
+      const prepared=materializeCandidate(action.winner,adapter,sidecarDir,roots[action.winner.rootOrdinal]!);
+      if(action.kind==="repair"&&action.winner.generation!==action.generation)action.kind="publish";
+      action.generation=action.winner.generation;action.prepared=prepared;action.record=prepared.record;return true;
+    }catch(error){const root=roots[action.winner.rootOrdinal]!;root.unitErrors++;root.complete=false;root.errors.push(`${action.winner.src.relPath}: ${errorMessage(error)}`);return false;}
+  };
   const chunkSize=normalizeChunkSize(opts.publicationChunkSize);
   for(let offset=0;offset<actions.length;offset+=chunkSize){
-    const chunk=actions.slice(offset,offset+chunkSize);
+    // Constructions load one chunk at a time and are released once it commits,
+    // so publication memory follows the chunk, not every changed session.
+    const chunk=actions.slice(offset,offset+chunkSize).filter(materializeAction);
     db.transaction(()=>{
       for(const action of chunk){
         const root=roots[action.winner.rootOrdinal]!;
@@ -218,6 +230,7 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
         }
       }
     })();
+    for(const action of chunk){action.prepared=null;action.record=null;action.winner.prepared=null;if(action.winner.sidecar)action.winner.sidecar.prepared=null;}
     publicationChunks++;opts.faultAfterPublicationChunk?.(publicationChunks);
   }
   for(const root of roots)persistRootResult(db,reconciliationSourceId,root);
