@@ -247,7 +247,7 @@ test("Wave 1 operations — rebuild service requires confirmation and hard warni
   expect(warning).toContain("Missing stable targets block the swap");
 });
 
-test("Wave 1 operations — doctor judges a walk left incomplete by live-root churn on its last complete pass", async () => {
+test("Wave 1 operations — doctor counts a churn-only walk as fresh until orphan marking waits a day", async () => {
   const { root, config } = fixture("doctor-churn");
   const configPath = join(root, "fixture-config.toml");
   const schedulePath = join(root, "fixture-schedule.plist");
@@ -284,22 +284,34 @@ test("Wave 1 operations — doctor judges a walk left incomplete by live-root ch
 
   const fresh = collectDoctorReport(db, config, now, configPath);
   expect(line(fresh, "full reconciliation")).toContain("[ok]");
-  expect(line(fresh, "full reconciliation")).toContain("roots changed during walk · last complete 2s ago · denominator 1");
+  expect(line(fresh, "full reconciliation")).toContain("roots changed during walk · orphan marking deferred · last complete 2s ago · denominator 1");
   expect(line(fresh, "schedule")).toContain("[ok]");
   expect(line(fresh, "schedule")).toContain("source incomplete (roots changed during walk)");
   expect(fresh.status).toBe("healthy");
 
-  completedAt(now - 2 * 60 * 60_000);
-  const aging = collectDoctorReport(db, config, now, configPath);
-  expect(line(aging, "full reconciliation")).toContain("[DEGRADED]");
-  expect(line(aging, "schedule")).toContain("[ok]");
-  expect(aging.status).toBe("degraded");
-
+  // A working day of churn keeps the archive fresh; only a starved orphan pass degrades.
   completedAt(now - 7 * 60 * 60_000);
+  const working = collectDoctorReport(db, config, now, configPath);
+  expect(line(working, "full reconciliation")).toContain("[ok]");
+  expect(working.status).toBe("healthy");
+  completedAt(now - 25 * 60 * 60_000);
+  const starved = collectDoctorReport(db, config, now, configPath);
+  expect(line(starved, "full reconciliation")).toContain("[DEGRADED]");
+  expect(line(starved, "schedule")).toContain("[ok]");
+  expect(starved.status).toBe("degraded");
+  db.prepare(`DELETE FROM reconciliation_roots WHERE reconciliation_source_id IN (SELECT id FROM reconciliation_sources WHERE group_id=?)`).run(completeGroup);
+  db.prepare(`DELETE FROM reconciliation_sources WHERE group_id=?`).run(completeGroup);
+  expect(line(collectDoctorReport(db, config, now, configPath), "full reconciliation")).toContain("[DEGRADED]");
+
+  // The churn pass itself ages on the ordinary walk clock.
+  const churnFinished = (ms: number) => db.prepare(`UPDATE reconciliation_groups SET finished_at=? WHERE id=?`).run(ms, churnGroup);
+  churnFinished(now - 2 * 60 * 60_000);
+  expect(line(collectDoctorReport(db, config, now, configPath), "full reconciliation")).toContain("[DEGRADED]");
+  churnFinished(now - 7 * 60 * 60_000);
   expect(line(collectDoctorReport(db, config, now, configPath), "full reconciliation")).toContain("[DOWN]");
+  churnFinished(now - 1000);
 
   // Anything beyond churn (unit errors, an unclean root) keeps the incomplete pass DOWN.
-  completedAt(now - 2000);
   db.prepare(`UPDATE reconciliation_sources SET error_unit_count=1 WHERE id=?`).run(churnSource);
   const errored = collectDoctorReport(db, config, now, configPath);
   expect(line(errored, "full reconciliation")).toContain("[DOWN]");

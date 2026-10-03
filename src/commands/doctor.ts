@@ -26,6 +26,8 @@ interface CompletePass {finished_at:number|null;admissible_identity_count:number
  * explicit age threshold and confirmation.
  */
 export const TARGETED_INGEST_STALE_AFTER_MS = 10 * 60_000;
+/** Overnight walks are stable; a day of live churn means orphan marking is starved. */
+export const ORPHAN_MARKING_DEGRADED_AFTER_MS = 24 * 60 * 60_000;
 
 export function collectDoctorReport(db:DB,config:Config,now=Date.now(),configPath="<runtime-config>",storageProbe:VolumeIdentityProbe=defaultVolumeIdentityProbe):DoctorReport{
  const begun=performance.now(),digest=sourcePlanDigest(config),thresholds={...DEFAULT_TUNABLES,...config.tunables},lines:string[]=[];let severity:Severity="healthy";const launchdStatusCache=new Map<string,boolean|null>();
@@ -57,17 +59,20 @@ export function collectDoctorReport(db:DB,config:Config,now=Date.now(),configPat
   }
   if(!latest){elevate("down");lines.push(`  [DOWN] ${pad(source,7)} full reconciliation · never · denominator unknown`);}
   else{
-    // Live roots that change mid-walk leave a pass incomplete (orphan marking
-    // waits) without anything being wrong; the last complete pass then sets
-    // the age, on the same degraded/stale clock.
+    // Live roots that change mid-walk leave a pass incomplete without anything
+    // being wrong: everything seen was published and only orphan marking waits
+    // for a stable walk. Freshness follows that pass; the last complete one
+    // supplies the denominator and degrades once orphan marking waits a day.
     const churn=latest.source_status!=="complete"&&latest.error_unit_count===0&&walkChurnOnly(db,latest.source_id);
     const basis=churn?lastComplete(db,digest,source):latest.source_status==="complete"?latest:null;
-    const ageMs=basis?.finished_at==null?Infinity:now-basis.finished_at;let state:Severity=basis?"healthy":"down";
+    const fresh=churn||latest.source_status==="complete";
+    const ageMs=!fresh||latest.finished_at==null?Infinity:now-latest.finished_at;let state:Severity=fresh?"healthy":"down";
     if(state==="healthy"&&ageMs>thresholds.full_walk_stale_after_ms)state="down";else if(state==="healthy"&&ageMs>thresholds.full_walk_degraded_after_ms)state="degraded";
+    if(churn&&state==="healthy"&&(basis?.finished_at==null||now-basis.finished_at>ORPHAN_MARKING_DEGRADED_AFTER_MS))state="degraded";
     if(rootNewer&&state==="healthy")state="degraded";if(rootDown)state="down";elevate(state);
     const denominator=state==="down"||basis?.admissible_identity_count==null?"unknown":String(basis.admissible_identity_count);
     const percentage=denominator==="unknown"?"":` · ${basis!.archived_identity_count}/${denominator}`;
-    const status=churn?`incomplete · roots changed during walk · last complete ${age(basis?.finished_at??null,now)}`:latest.source_status;
+    const status=churn?`incomplete · roots changed during walk · orphan marking deferred · last complete ${age(basis?.finished_at??null,now)}`:latest.source_status;
     lines.push(`  [${label(state)}] ${pad(source,7)} full reconciliation · ${age(latest.finished_at,now)} · ${status} · denominator ${denominator}${percentage} · observed ${interval(latest.started_at,latest.finished_at)}`);
     lines.push(`  [${latest.error_unit_count?"DOWN":"ok"}] ${pad(source,7)} quality · physical ${latest.physical_unit_count} · canonical ${latest.canonical_candidate_count} · unique ${latest.admissible_identity_count??"unknown"} · duplicate ${latest.duplicate_candidate_count} · rejected ${latest.rejected_unit_count} · errors ${latest.error_unit_count}`);
   }
