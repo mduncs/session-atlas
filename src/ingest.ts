@@ -204,7 +204,7 @@ async function reconcileSource(db:DB,adapter:Adapter,plan:SourceConfig,reconcili
       const prepared=materializeCandidate(action.winner,adapter,sidecarDir,roots[action.winner.rootOrdinal]!);
       if(action.kind==="repair"&&action.winner.generation!==action.generation)action.kind="publish";
       action.generation=action.winner.generation;action.prepared=prepared;action.record=prepared.record;return true;
-    }catch(error){const root=roots[action.winner.rootOrdinal]!;root.unitErrors++;root.complete=false;root.errors.push(`${action.winner.src.relPath}: ${errorMessage(error)}`);return false;}
+    }catch(error){const root=roots[action.winner.rootOrdinal]!;root.complete=false;if(error instanceof SourceChangedDuringSidecarCaptureError){root.liveUnits++;root.changed=true;}else{root.unitErrors++;root.errors.push(`${action.winner.src.relPath}: ${errorMessage(error)}`);}return false;}
   };
   const chunkSize=normalizeChunkSize(opts.publicationChunkSize);
   for(let offset=0;offset<actions.length;offset+=chunkSize){
@@ -300,7 +300,9 @@ function materializeCandidate(candidate:Candidate,adapter:Adapter,sidecarDir:str
   }catch(error){
     if(!(error instanceof InvalidIngestSidecarError))throw error;
     const previous=candidate.sidecar.header.outcome;
-    const refreshed=resolveIngestSidecar({root:sidecarDir,adapter,source:candidate.src,force:true,parse:()=>{work.sourceParses++;return parseAdmission(adapter,candidate.src);},validate:record=>{validateIdentity(record,adapter.source);validateDraft(record,adapter.source);}});
+    const capture=()=>resolveIngestSidecar({root:sidecarDir,adapter,source:candidate.src,force:true,parse:()=>{work.sourceParses++;return parseAdmission(adapter,candidate.src);},validate:record=>{validateIdentity(record,adapter.source);validateDraft(record,adapter.source);}});
+    let refreshed:ResolvedSidecar;
+    try{refreshed=capture();}catch(error){if(!(error instanceof SourceChangedDuringSidecarCaptureError))throw error;refreshed=capture();}
     work.sidecarMisses++;
     if(refreshed.header.outcome.kind!=="admitted"||previous.kind!=="admitted")throw new Error("sidecar recapture no longer admits the candidate");
     const next=refreshed.header.outcome;

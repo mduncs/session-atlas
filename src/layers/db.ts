@@ -222,12 +222,12 @@ export function layersPathFor(dbPath: string): string {
 }
 
 /** Open (creating if needed) the layers DB for a derivation pass. */
-export function openLayersDb(dbPath: string): Database {
+export function openLayersDb(dbPath: string, options: { busyTimeoutMs?: number } = {}): Database {
   const path = layersPathFor(dbPath);
   const db = new Database(path);
   // Layers quote md's words (paragraphs, labels, search queries): same privacy as the archive.
   try { chmodSync(path, 0o600); } catch { /* not owner: leave as found */ }
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;");
+  db.exec(`PRAGMA busy_timeout = ${options.busyTimeoutMs ?? 5000}; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;`);
   // v4: tag_merges gains 'nest' (a subtopic keeps its identity under a parent tag).
   const merges = db.query(`SELECT sql FROM sqlite_master WHERE type='table' AND name='tag_merges'`).get() as { sql: string } | null;
   const upgradeMerges = merges !== null && !merges.sql.includes("'nest'");

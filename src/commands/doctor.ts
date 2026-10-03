@@ -63,7 +63,7 @@ export function collectDoctorReport(db:DB,config:Config,now=Date.now(),configPat
     // being wrong: everything seen was published and only orphan marking waits
     // for a stable walk. Freshness follows that pass; the last complete one
     // supplies the denominator and degrades once orphan marking waits a day.
-    const churn=latest.source_status!=="complete"&&latest.error_unit_count===0&&walkChurnOnly(db,latest.source_id);
+    const churn=latest.source_status==="incomplete"&&latest.error_unit_count===0&&walkChurnOnly(db,latest.source_id);
     const basis=churn?lastComplete(db,digest,source):latest.source_status==="complete"?latest:null;
     const fresh=churn||latest.source_status==="complete";
     const ageMs=!fresh||latest.finished_at==null?Infinity:now-latest.finished_at;let state:Severity=fresh?"healthy":"down";
@@ -89,7 +89,7 @@ export function collectDoctorReport(db:DB,config:Config,now=Date.now(),configPat
   const loaded=schedule?.schedule_kind==="launchd"&&schedule.schedule_path?cachedLaunchdStatus(schedule.schedule_path,launchdStatusCache):null;
   const scheduleOk=Boolean(schedule?.schedule_kind&&schedule.schedule_path&&scheduleArtifactMatches(schedule.schedule_path,schedule.target_config_path)&&schedule.target_config_path===configPath&&schedule.target_db_path===config.dbPath&&loaded!==false);
   const scheduledSource=schedule?.last_scheduled_group_id?db.prepare(`SELECT g.finished_at,rs.id source_id,rs.status source_status,rs.error_unit_count FROM reconciliation_groups g LEFT JOIN reconciliation_sources rs ON rs.group_id=g.id AND rs.source=? WHERE g.id=?`).get(source,schedule.last_scheduled_group_id) as ScheduledSource|null:null;
-  const scheduledChurn=Boolean(scheduledSource?.source_id&&scheduledSource.source_status!=="complete"&&scheduledSource.error_unit_count===0&&walkChurnOnly(db,scheduledSource.source_id));
+  const scheduledChurn=Boolean(scheduledSource?.source_id&&scheduledSource.source_status==="incomplete"&&scheduledSource.error_unit_count===0&&walkChurnOnly(db,scheduledSource.source_id));
   const cadenceOk=Boolean(scheduledSource?.finished_at&&now-scheduledSource.finished_at<=thresholds.full_walk_stale_after_ms&&(scheduledSource.source_status==="complete"||scheduledChurn));
   if(!scheduleOk||!cadenceOk)elevate("down");
   lines.push(`  [${scheduleOk&&cadenceOk?"ok":"DOWN"}] ${pad(source,7)} schedule · ${schedule?.schedule_kind??"missing"} ${schedule?.schedule_path?homePath(schedule.schedule_path):"path missing"}${loaded===false?" · service unloaded":""} · interval ${duration(schedule?.expected_interval_ms??thresholds.full_walk_interval_ms)} · last scheduled ${scheduledSource?age(scheduledSource.finished_at,now):"never"} · source ${scheduledSource?.source_status??"missing"}${scheduledChurn?" (roots changed during walk)":""} · target ${homePath(configPath)} → ${homePath(config.dbPath)}`);

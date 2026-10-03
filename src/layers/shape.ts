@@ -170,11 +170,12 @@ interface SessionText { units: Unit[]; opener: string | null; compactions: numbe
 /**
  * Dialogue rows for shapes, in session order. Prose is only ever read 2000
  * characters at a time, so SQLite trims it first: 2000 code points always
- * cover the first 2000 UTF-16 units, and the JS slice is unchanged.
+ * cover the first 2000 UTF-16 units, and the JS slice is unchanged. SQLite
+ * substr stops at NUL, so those rare strings must reach the JS slice intact.
  */
 function textRows(filter: string): string {
   return `SELECT m.session_id AS sid, m.ordinal, m.ts, m.record_kind AS kind, m.role,
-      CASE WHEN m.record_kind='assistant_dialogue_prose' THEN substr(m.text,1,2000) ELSE m.text END AS text
+      CASE WHEN m.record_kind='assistant_dialogue_prose' AND instr(m.text,char(0))=0 THEN substr(m.text,1,2000) ELSE m.text END AS text
     FROM messages m JOIN sessions s ON s.id=m.session_id AND m.construction_generation=s.construction_generation
    WHERE ${filter}(m.record_kind IN ('real_user','assistant_dialogue_prose')
           OR (m.role='user' AND m.text LIKE '<command-name>/compact%'))

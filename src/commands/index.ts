@@ -45,9 +45,11 @@ export async function indexCmd(argv:string[],options:IndexCommandOptions={}):Pro
  * memory back on exit. A layer failure never fails ingest.
  */
 function refreshLayersIsolated(configPath:string):void{
-  Bun.gc(true);
-  const child=Bun.spawnSync([process.execPath,"run",join(import.meta.dir,"..","cli.ts"),"layers","all","--config",configPath],{stdout:"inherit",stderr:"inherit"});
-  if(child.exitCode!==0)process.stdout.write(`atlas index · layers skipped: exit ${child.exitCode}\n`);
+  try{
+    Bun.gc(true);
+    const child=Bun.spawnSync([process.execPath,"run",join(import.meta.dir,"..","cli.ts"),"layers","all","--config",configPath],{stdout:"inherit",stderr:"inherit"});
+    if(child.exitCode!==0)process.stdout.write(`atlas index · layers skipped: exit ${child.exitCode}\n`);
+  }catch(error){process.stdout.write(`atlas index · layers skipped: ${error instanceof Error?error.message:String(error)}\n`);}
 }
 export function walkChurnOnly(s:Awaited<ReturnType<typeof ingest>>[number]):boolean{
   return s.roots.length>0&&s.roots.every(root=>root.reachable&&!root.error&&(root.unitErrors??0)===0)&&s.roots.some(root=>root.changedDuringWalk===true);

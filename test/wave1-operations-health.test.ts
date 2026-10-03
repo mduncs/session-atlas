@@ -311,6 +311,13 @@ test("Wave 1 operations — doctor counts a churn-only walk as fresh until orpha
   expect(line(collectDoctorReport(db, config, now, configPath), "full reconciliation")).toContain("[DOWN]");
   churnFinished(now - 1000);
 
+  // A source can fail after root results are saved (for example in chain assembly).
+  db.prepare(`UPDATE reconciliation_sources SET status='failed' WHERE id=?`).run(churnSource);
+  const failed = collectDoctorReport(db, config, now, configPath);
+  expect(line(failed, "full reconciliation")).toContain("[DOWN]");
+  expect(line(failed, "schedule")).toContain("[DOWN]");
+  db.prepare(`UPDATE reconciliation_sources SET status='incomplete' WHERE id=?`).run(churnSource);
+
   // Anything beyond churn (unit errors, an unclean root) keeps the incomplete pass DOWN.
   db.prepare(`UPDATE reconciliation_sources SET error_unit_count=1 WHERE id=?`).run(churnSource);
   const errored = collectDoctorReport(db, config, now, configPath);

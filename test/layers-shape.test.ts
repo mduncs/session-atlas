@@ -16,6 +16,26 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+test("shape streaming keeps assistant prose after an embedded NUL", async () => {
+  const root = mkdtempSync(join(tmpdir(), "atlas-shape-nul-"));
+  roots.push(root);
+  const dbPath = join(root, "atlas.db");
+  atlas = await openDb(dbPath);
+  const sid = Number(atlas.query(`INSERT INTO sessions(harness,native_id,source_path,ingested_at,construction_generation) VALUES ('claude','nul','fixture',1,'g')`).run().lastInsertRowid);
+  const insert = atlas.query(`INSERT INTO messages(session_id,ordinal,role,text,record_kind,construction_generation) VALUES (?,?,?,?,?,'g')`);
+  for (let i = 0; i < 10; i++) {
+    insert.run(sid, i * 2, "user", "ok", "real_user");
+    insert.run(sid, i * 2 + 1, "assistant", i === 0 ? "\0zebrafish zebrafish" : "done", "assistant_dialogue_prose");
+  }
+  const layers = openLayersDb(dbPath);
+  try {
+    computeShapes(atlas, layers);
+    const episodes = layers.query(`SELECT keywords FROM session_episodes WHERE native_id='nul'`).all() as { keywords: string }[];
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]!.keywords).toContain("zebrafish");
+  } finally { layers.close(); }
+});
+
 const NATIVE = "33333333-3333-4333-8333-333333333333";
 const at = (second: number) => new Date(Date.UTC(2026, 7, 6, 19, 0, second)).toISOString();
 let serial = 0;

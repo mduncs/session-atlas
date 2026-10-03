@@ -121,10 +121,9 @@ async function run(argv: string[]): Promise<number> {
     const layersPath = layersPathFor(dbPath);
     const release = takeLock(layersPath);
     if (!release) { process.stdout.write("atlas layers run · another runner holds the lock; nothing to do\n"); return 0; }
-    const layers = openLayersDb(dbPath);
     // A background runner outwaits the layer refresh after each index (its
     // write transaction can run past a minute) instead of failing at boot.
-    layers.exec("PRAGMA busy_timeout = 120000;");
+    const layers = openLayersDb(dbPath, { busyTimeoutMs: 120000 });
     const controller = new AbortController();
     const stop = (signal: string) => { log(`${signal} · stopping after returning in-flight items to pending`); controller.abort(); };
     process.on("SIGTERM", () => stop("SIGTERM"));

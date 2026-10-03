@@ -615,3 +615,33 @@ test("a transcript still being written is walk churn, not a unit error", async (
   expect(live).toMatchObject({ orphans: 0, sourceParses: 2 });
   expect(db.prepare(`SELECT orphaned FROM sessions WHERE native_id='live-1'`).get()).toEqual({ orphaned: 0 });
 });
+
+test("a live source during mid-chunk sidecar recovery is retried and counted as churn", async () => {
+  const f = fixture("live-recovery");
+  const harness = makeFixture(f.sourceRoot, [
+    { nativeId: "settled-1", relPath: "settled.txt", initial: "settled\n" },
+    { nativeId: "live-1", relPath: "live.txt", initial: "live\n" },
+  ], (source, raw) => recordFor(source, raw));
+  let recovering = false;
+  const parse = harness.adapter.parse;
+  harness.adapter.parse = source => {
+    const result = parse(source);
+    if (recovering && source.nativeId === "live-1") appendFileSync(source.fullPath, "more\n");
+    return result;
+  };
+  db = await openDb(f.dbPath);
+  const summary = (await ingest(db, config(f.sourceRoot, f.dbPath), {
+    adapters: { fixture: harness.adapter }, sidecarDir: f.sidecarDir, publicationChunkSize: 1,
+    faultAfterPublicationChunk: completed => {
+      if (completed !== 1) return;
+      const path = sidecarFiles(f.sidecarDir).find(path => readSidecar(path).header.source.provisionalNativeId === "live-1")!;
+      const bytes = readFileSync(path);
+      bytes[bytes.length - 1] ^= 1;
+      writeFileSync(path, bytes);
+      recovering = true;
+    },
+  }))[0]!;
+  expect(summary).toMatchObject({ inserted: 1, sourceParses: 4, orphans: 0 });
+  expect(summary.roots[0]).toMatchObject({ unitErrors: 0, changedDuringWalk: true, error: undefined });
+  expect(walkChurnOnly(summary)).toBe(true);
+});
